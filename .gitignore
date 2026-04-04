@@ -1,0 +1,19 @@
+# Swift / Xcode
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+*.xcworkspace
+
+# macOS
+.DS_Store
+._*
+
+# Claude Code
+.claude/
+
+# Environment / secrets
+.env
+*.pem
+credentials.json
