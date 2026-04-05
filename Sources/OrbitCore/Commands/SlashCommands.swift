@@ -37,6 +37,7 @@ public enum SlashCommandAction: Sendable, Equatable {
     case resume(String?)
     case dream
     case deep(String)
+    case memory
 }
 
 /// Result from executing a slash command.
@@ -134,8 +135,11 @@ private func builtinSlashCommands() -> [SlashCommand] {
         ("status", "Current session status"),
         ("cost", "Show session token usage and cost"),
         ("model", "Show or switch active model"),
+        ("memory", "Show memory topics for current project"),
         ("dream", "Trigger memory consolidation"),
         ("deep", "Launch a deep analysis task"),
+        ("trace", "Show agent trace for current session"),
+        ("permissions", "Show current permission mode"),
         ("compact", "Manually compact conversation history"),
         ("resume", "Resume a previous session"),
         ("export", "Export conversation transcript"),
@@ -191,6 +195,18 @@ private func builtinSlashCommands() -> [SlashCommand] {
         SlashCommand(name: "deep", description: "Launch a deep analysis task") { args, _ in
             let prompt = args ?? "Analyze the current state of the project."
             return .action(.deep(prompt), output: "Launching deep task...")
+        },
+
+        SlashCommand(name: "memory", description: "Show memory topics for current project") { _, ctx in
+            .action(.memory, output: "Loading memory for \(ctx.project)...")
+        },
+
+        SlashCommand(name: "trace", description: "Show agent trace for current session") { _, ctx in
+            .text("Session: \(ctx.sessionID)\nMessages: \(ctx.messageCount)\nTokens: \(ctx.sessionUsage.totalTokens)")
+        },
+
+        SlashCommand(name: "permissions", description: "Show current permission mode") { _, _ in
+            .text("Permission mode: danger-full-access (default for REPL)")
         },
 
         SlashCommand(name: "compact", description: "Manually compact conversation history") { _, _ in

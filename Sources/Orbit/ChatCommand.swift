@@ -145,6 +145,21 @@ struct Chat: AsyncParsableCommand {
                     } else {
                         print("Nothing to compact.\n")
                     }
+                case .memory:
+                    if let store = memoryStore {
+                        let topics = (try? await store.listTopics(project: projectConfig.slug)) ?? []
+                        if topics.isEmpty {
+                            print("No memory topics for this project.\n")
+                        } else {
+                            print("Memory topics (\(topics.count)):")
+                            for topic in topics {
+                                print("  \(topic.slug) — \(topic.title)")
+                            }
+                            print()
+                        }
+                    } else {
+                        print("Memory store not available.\n")
+                    }
                 case .switchModel(let newModel):
                     currentModel = newModel
                     print()
