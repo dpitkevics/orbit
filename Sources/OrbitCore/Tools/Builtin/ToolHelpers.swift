@@ -29,6 +29,8 @@ public func builtinTools() -> [any Tool] {
         GitLogTool(),
         StructuredOutputTool(),
         SendNotificationTool(),
+        BrowserTool(),
+        ComputerUseTool(),
     ]
 }
 

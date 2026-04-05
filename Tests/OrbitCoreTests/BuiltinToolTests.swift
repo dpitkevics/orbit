@@ -361,7 +361,7 @@ struct BuiltinToolTests {
     @Test("builtinTools returns all 11 tools")
     func builtinToolsCount() {
         let tools = builtinTools()
-        #expect(tools.count == 11)
+        #expect(tools.count == 13)
 
         let names = Set(tools.map { $0.name })
         #expect(names.contains("bash"))

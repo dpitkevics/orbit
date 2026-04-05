@@ -13,7 +13,7 @@ struct OrbitCLI: AsyncParsableCommand {
             Init.self, Project.self, Memory.self,
             Schedule.self, Daemon.self,
             Auth.self, Status.self,
-            Code.self, Skills.self, Cost.self, Trace.self, Logs.self,
+            Code.self, Skills.self, Cost.self, Trace.self, Logs.self, Completions.self,
         ],
         defaultSubcommand: Chat.self
     )

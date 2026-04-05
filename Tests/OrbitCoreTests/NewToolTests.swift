@@ -200,12 +200,12 @@ struct NewToolTests {
 
     // MARK: - allTools factory
 
-    @Test("allTools includes all 12 tools")
+    @Test("allTools includes all 14 tools")
     func allToolsCount() {
         let provider = MockProvider.textOnly("test")
         let policy = PermissionPolicy(activeMode: .dangerFullAccess)
         let tools = allTools(provider: provider, policy: policy)
-        #expect(tools.count == 12)
+        #expect(tools.count == 14)
 
         let names = Set(tools.map { $0.name })
         #expect(names.contains("bash"))
@@ -218,10 +218,10 @@ struct NewToolTests {
         #expect(names.contains("send_notification"))
     }
 
-    @Test("builtinTools returns 11 tools (no agent)")
+    @Test("builtinTools returns 13 tools (no agent)")
     func builtinToolsCount() {
         let tools = builtinTools()
-        #expect(tools.count == 11)
+        #expect(tools.count == 13)
         #expect(!tools.contains { $0.name == "agent" })
     }
 }
