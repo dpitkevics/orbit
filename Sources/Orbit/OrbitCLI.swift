@@ -8,7 +8,8 @@ struct OrbitCLI: AsyncParsableCommand {
         commandName: "orbit",
         abstract: "LLM-agnostic agent platform for project operations.",
         version: "0.1.0",
-        subcommands: [Ask.self]
+        subcommands: [Chat.self, Ask.self],
+        defaultSubcommand: Chat.self
     )
 }
 
@@ -28,13 +29,13 @@ struct Ask: AsyncParsableCommand {
     @Option(name: .long, help: "Override the model to use.")
     var model: String?
 
-    @Option(name: .long, help: "Auth mode: 'apiKey' or 'bridge' (auto-detected if omitted).")
+    @Option(name: .long, help: "Auth mode: 'apiKey' or 'bridge'.")
     var authMode: String?
 
     @Option(name: .long, help: "Maximum tool-use turns (default: 8).")
     var maxTurns: Int = 8
 
-    @Flag(name: .long, help: "Disable tool use (text-only response).")
+    @Flag(name: .long, help: "Disable tool use.")
     var noTools: Bool = false
 
     @Flag(name: .long, help: "Show token usage and cost after the response.")
@@ -53,23 +54,19 @@ struct Ask: AsyncParsableCommand {
         let effectiveModel = model ?? projectConfig.effectiveModel(global: globalConfig)
         let effectiveProvider = projectConfig.effectiveProvider(global: globalConfig)
 
-        let provider = try resolveProvider(
+        let provider = try resolveProviderForChat(
             providerName: effectiveProvider,
             model: effectiveModel,
             authModeOverride: authMode,
             globalConfig: globalConfig
         )
 
-        let systemPrompt = buildSystemPrompt(project: projectConfig)
+        let systemPrompt = buildAskSystemPrompt(project: projectConfig)
 
-        // Build tool pool
         let tools: [any Tool] = noTools ? [] : builtinTools()
         let toolPool = ToolPool(tools: tools)
-
-        // Permission policy — default to workspace-write for ask
         let policy = PermissionPolicy(activeMode: .dangerFullAccess)
 
-        // Build query engine
         let engine = QueryEngine(
             provider: provider,
             toolPool: toolPool,
@@ -135,138 +132,21 @@ struct Ask: AsyncParsableCommand {
     }
 }
 
-// MARK: - Terminal Permission Prompter
+// MARK: - Helpers
 
-struct TerminalPrompter: PermissionPrompter {
-    func prompt(toolName: String, input: String, reason: String) async -> Bool {
-        print("\n⚠ Permission required: \(toolName)")
-        print("  Reason: \(reason)")
-        print("  Allow? [y/N] ", terminator: "")
-        fflush(stdout)
-        guard let line = readLine()?.lowercased() else { return false }
-        return line == "y" || line == "yes"
-    }
-}
-
-// MARK: - Provider Resolution
-
-private func resolveProvider(
-    providerName: String,
-    model: String,
-    authModeOverride: String?,
-    globalConfig: OrbitConfig
-) throws -> any LLMProvider {
-    let authConfig = globalConfig.auth[providerName]
-    let resolvedMode: AuthMode
-
-    if let override = authModeOverride {
-        guard let mode = AuthMode(rawValue: override) else {
-            throw AuthError.unsupportedAuthMode(.bridge)
-        }
-        resolvedMode = mode
-    } else if let configured = authConfig?.mode {
-        resolvedMode = configured
-    } else {
-        resolvedMode = autoDetectAuthMode(provider: providerName, authConfig: authConfig)
-    }
-
-    switch resolvedMode {
-    case .apiKey:
-        let apiKey = try resolveAPIKey(provider: providerName, authConfig: authConfig)
-        return AnthropicProvider(apiKey: apiKey, model: model)
-
-    case .bridge:
-        let cliPath = try resolveCLIPath(provider: providerName, authConfig: authConfig)
-        return BridgeProvider(name: providerName, cliPath: cliPath, model: model)
-
-    case .oauth:
-        throw AuthError.unsupportedAuthMode(.oauth)
-    }
-}
-
-private func autoDetectAuthMode(provider: String, authConfig: AuthConfig?) -> AuthMode {
-    if authConfig?.resolveAPIKey() != nil {
-        return .apiKey
-    }
-
-    let envVarName: String = switch provider {
-    case "anthropic": "ANTHROPIC_API_KEY"
-    case "openai": "OPENAI_API_KEY"
-    default: "\(provider.uppercased())_API_KEY"
-    }
-
-    if ProcessInfo.processInfo.environment[envVarName] != nil {
-        return .apiKey
-    }
-
-    if let cliPath = authConfig?.cliPath,
-       FileManager.default.isExecutableFile(atPath: cliPath) {
-        return .bridge
-    }
-
-    if BridgeProvider.detectClaudeCLI() != nil {
-        return .bridge
-    }
-
-    return .apiKey
-}
-
-private func resolveAPIKey(provider: String, authConfig: AuthConfig?) throws -> String {
-    if let key = authConfig?.resolveAPIKey() {
-        return key
-    }
-
-    let envVarName: String = switch provider {
-    case "anthropic": "ANTHROPIC_API_KEY"
-    case "openai": "OPENAI_API_KEY"
-    default: "\(provider.uppercased())_API_KEY"
-    }
-
-    if let key = ProcessInfo.processInfo.environment[envVarName] {
-        return key
-    }
-
-    throw AuthError.missingAPIKey(provider: provider, envVar: envVarName)
-}
-
-private func resolveCLIPath(provider: String, authConfig: AuthConfig?) throws -> String {
-    if let path = authConfig?.cliPath,
-       FileManager.default.isExecutableFile(atPath: path) {
-        return path
-    }
-
-    if provider == "anthropic", let path = BridgeProvider.detectClaudeCLI() {
-        return path
-    }
-
-    throw ProviderError.authenticationFailed(
-        "No CLI tool found for '\(provider)'. Install the claude CLI or set cli_path in config."
-    )
-}
-
-// MARK: - System Prompt
-
-private func buildSystemPrompt(project: ProjectConfig) -> String {
+private func buildAskSystemPrompt(project: ProjectConfig) -> String {
     var parts: [String] = []
-
     parts.append("""
     You are Orbit, an AI operations assistant. You help manage projects, \
     analyze business data, and handle operational tasks. You are NOT a coding \
     agent — you are an operations manager. You have access to tools for \
     file operations, shell commands, and search. Use them when needed.
     """)
-
     if !project.description.isEmpty {
         parts.append("Project: \(project.name)\n\(project.description)")
     }
-
-    parts.append("Today's date: \(formattedDate()).")
-
-    return parts.joined(separator: "\n\n")
-}
-
-private func formattedDate() -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd"
-    return formatter.string(from: Date())
+    parts.append("Today's date: \(formatter.string(from: Date())).")
+    return parts.joined(separator: "\n\n")
 }

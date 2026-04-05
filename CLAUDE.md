@@ -4,7 +4,7 @@ Read ORBIT_PROJECT_SPEC.md for the full project specification.
 
 ## Current Phase
 
-Phase 6 — Interactive REPL. Phases 0-5 are complete.
+Phase 7 — Scheduler + Daemon. Phases 0-6 are complete.
 
 ## Completed Phases
 
@@ -50,6 +50,13 @@ Located in `docs/`: CLAW_CODE_ANALYSIS.md, SWIFT_PATTERNS.md, ADAPTATION_NOTES.m
 - AgentTree actor: global tracking, cost aggregation, failed node detection, depth filtering, trace visualization
 - AgentResult, TraceEntry, MemoryAccessLevel types
 - TDD for all core logic
+
+### Phase 6 — Interactive REPL + OpenAI Provider (209 tests)
+- Interactive REPL: `orbit chat` (default command), readline loop, streaming output, session auto-save
+- Slash command system: /help, /status, /cost, /model, /compact, /resume, /export, /clear, /exit
+- OpenAI provider: GPT-4o, o3, GPT-4o-mini with streaming + tool use via SwiftOpenAI SDK
+- Shared provider resolver: auto-detect auth mode (API key → bridge → error), supports both providers
+- Session persistence wired into REPL
 
 ## Key Architecture Decisions
 
