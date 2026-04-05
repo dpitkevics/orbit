@@ -456,6 +456,207 @@ orbit ask default "Hello" --auth-mode oauth
 
 ---
 
+## Example Session
+
+Here's what a typical Orbit session looks like:
+
+```
+$ orbit
+Orbit v0.1.0 — my-project
+Model: claude-sonnet-4-6 | Provider: anthropic | Skills: 2
+
+Type /help for commands, /exit to quit.
+
+▸ What's the recent git activity on this project?
+  ▶ git_log ✓ (3a7f2c1 2026-04-04 dpitkevics: feat: add user onboarding flow...)
+
+Here's your recent activity for the last 7 days:
+
+- **3a7f2c1** feat: add user onboarding flow (Apr 4)
+- **b29e1a3** fix: correct timezone handling in scheduler (Apr 3)
+- **8c4d9f2** refactor: extract payment module (Apr 2)
+
+3 commits by 1 author. The focus has been on user onboarding and
+infrastructure improvements.
+
+▸ Search for any TODO comments in the codebase
+  ▶ grep_search ✓ (src/auth/login.swift:42: // TODO: add rate limiting...)
+
+Found 3 TODOs:
+1. `src/auth/login.swift:42` — add rate limiting
+2. `src/api/webhooks.swift:15` — validate payload signatures
+3. `src/jobs/cleanup.swift:8` — add error retry logic
+
+▸ /cost
+Input tokens:  1,542
+Output tokens: 387
+Total cost:    $0.0089
+
+▸ /exit
+```
+
+---
+
+## ORBIT.md Files
+
+Orbit discovers `ORBIT.md` files by walking up the directory tree from the current working directory (or project repo root). These files provide project-specific instructions to the LLM, similar to how Claude Code uses `CLAUDE.md`.
+
+**How discovery works:**
+1. Start at the current directory
+2. Walk up to the project root (or filesystem root)
+3. Collect all `ORBIT.md` files found
+4. Process root-level files first, then deeper ones
+5. Apply per-file limit (4,000 chars) and total limit (12,000 chars)
+6. Deduplicate by SHA-256 content hash
+
+**Example `ORBIT.md`:**
+
+```markdown
+# My Project
+
+## Context
+This is a B2B SaaS for project management. We serve small teams (5-20 people).
+
+## Key Metrics
+- MRR: tracked in Mixpanel under "Revenue" dashboard
+- Support: Zoho Desk, project "SUPPORT"
+- SEO: Ahrefs, main keyword "project management tool"
+
+## Brand Voice
+Professional but approachable. Avoid jargon. Always be concise.
+```
+
+---
+
+## Skill File Format
+
+Skills are markdown files stored in `~/.orbit/skills/`. They can be global (`_global/`) or project-specific (`{project}/`).
+
+**Basic skill (no frontmatter):**
+
+```markdown
+# SEO Monitor
+
+Check current search rankings for our main keywords.
+Compare with last week's positions.
+Flag any drops greater than 3 positions.
+```
+
+**Skill with YAML frontmatter:**
+
+```markdown
+---
+description: Daily project briefing with metrics and issues
+triggers: daily brief, morning update, standup
+mcps: analytics, support
+tools: web_fetch, bash
+---
+
+# Daily Brief
+
+1. Pull today's key metrics from analytics
+2. Check for any open critical support tickets
+3. Summarize recent git activity
+4. Flag anything that needs attention
+```
+
+**Frontmatter fields:**
+| Field | Description |
+|-------|-------------|
+| `description` | One-line description shown in skill listings |
+| `triggers` | Comma-separated keywords that activate this skill automatically |
+| `mcps` | MCP servers this skill needs |
+| `tools` | Tools this skill requires |
+
+Skills are loaded into the system prompt when trigger patterns match the user's query, or can be invoked explicitly.
+
+---
+
+## User Data Directory
+
+After running `orbit init`, your `~/.orbit/` directory looks like this:
+
+```
+~/.orbit/
++-- orbit.toml                 # Global configuration
++-- active-project             # Currently selected default project
++-- memory.db                  # SQLite database (memory + FTS5)
++-- credentials.json           # OAuth tokens (if using OAuth mode)
++-- projects/
+|   +-- my-project.toml        # Per-project configuration
+|   +-- another-project.toml
++-- schedules/
+|   +-- daily-brief.toml       # Scheduled task definitions
+|   +-- weekly-report.toml
++-- skills/
+|   +-- _global/               # Skills available to all projects
+|   |   +-- brand-voice.md
+|   +-- my-project/            # Project-specific skills
+|       +-- seo-monitor.md
++-- sessions/
+|   +-- my-project/            # Persisted chat sessions (JSON)
+|       +-- {session-id}.json
++-- logs/
+|   +-- daily/                 # Daemon daily observation logs
+|   |   +-- my-project/
+|   |       +-- 2026-04-05.md
+|   +-- tasks/                 # Scheduled task execution logs
+|   |   +-- daily-brief/
+|   |       +-- 2026-04-05T09:00:00Z.json
+|   +-- daemon.log             # Daemon stdout
+|   +-- daemon-error.log       # Daemon stderr
++-- deep-tasks/
+    +-- {task-id}/
+        +-- result.md           # Deep task output
+        +-- task.json           # Task metadata
+```
+
+---
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` | API key for Anthropic Claude (api_key auth mode) |
+| `OPENAI_API_KEY` | API key for OpenAI GPT models + vector embeddings |
+
+Orbit auto-detects these. If neither is set, it falls back to bridge mode (using the installed `claude` CLI).
+
+---
+
+## Troubleshooting
+
+**"No API key found for anthropic"**
+- Set `ANTHROPIC_API_KEY` environment variable, OR
+- Install the Claude Code CLI (`claude`) for bridge mode, OR
+- Run `orbit auth login` for OAuth mode
+
+**"claude CLI not found"**
+- Bridge mode requires the Claude Code CLI to be installed
+- Install it from [claude.ai/code](https://claude.ai/code) or switch to API key mode
+
+**"MCP server failed to connect"**
+- Check the server URL/command in your project TOML `[mcps.*]` section
+- For stdio servers: ensure the command is executable and in your PATH
+- For HTTP servers: verify the URL is reachable
+
+**"Permission denied" for a tool**
+- The default REPL permission mode is `danger-full-access` (allows everything)
+- If running with restricted permissions, the tool's required mode may be higher
+- Use `/permissions` in the REPL to check the current mode
+
+**Session won't resume**
+- Sessions are stored per-project in `~/.orbit/sessions/{project}/`
+- Use `/resume` with no argument to list available sessions
+- Session IDs are UUIDs — you only need to type the first 8 characters
+
+**Memory search returns no results**
+- Memory is populated from conversation transcripts saved on session exit
+- Run `/dream` to consolidate recent transcripts into searchable topics
+- FTS5 search uses keyword matching — try simpler terms
+
+---
+
 ## Built-in Tools
 
 | Tool | Category | Permission | Description |
