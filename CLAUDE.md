@@ -4,7 +4,7 @@ Read ORBIT_PROJECT_SPEC.md for the full project specification.
 
 ## Current Phase
 
-Phase 4 — MCP Integration. Phases 0-3 are complete.
+Phase 5 — Agent Tree. Phases 0-4 are complete.
 
 ## Completed Phases
 
@@ -37,6 +37,13 @@ Located in `docs/`: CLAW_CODE_ANALYSIS.md, SWIFT_PATTERNS.md, ADAPTATION_NOTES.m
 - SQLiteMemory (GRDB): 3-layer memory — index, topics, transcripts with FTS5 full-text search (TDD)
 - MemoryStore protocol with assembleContext for smart context selection
 - SkillLoader: markdown skill files with YAML frontmatter, trigger pattern matching, global + project scoping
+
+### Phase 4 — MCP Integration (174 tests)
+- MCPNaming: tool name normalization (mcp__{server}__{tool}), config hashing (SHA256)
+- MCPRegistry actor: multi-server state tracking, tool definition generation with prefixing
+- MCPConnector: official MCP Swift SDK integration, StdioTransport (subprocess piping), HTTPClientTransport
+- Value conversion between Orbit JSONValue and MCP Value types
+- Connection lifecycle: connect/disconnect/reconnect with status tracking
 
 ## Key Architecture Decisions
 

@@ -27,7 +27,7 @@ let package = Package(
         // Storage
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
 
-        // MCP (Phase 4 — included now so Package.swift is complete)
+        // MCP
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
     ],
     targets: [
@@ -41,7 +41,7 @@ let package = Package(
             ]
         ),
 
-        // Core library
+        // Core library (no MCP dependency — types, tools, engine, memory)
         .target(
             name: "OrbitCore",
             dependencies: [
@@ -51,6 +51,7 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
 
