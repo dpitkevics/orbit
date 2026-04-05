@@ -4,7 +4,7 @@ Read ORBIT_PROJECT_SPEC.md for the full project specification.
 
 ## Current Phase
 
-Phase 8 — autoDream + Deep Tasks. Phases 0-7 are complete.
+Phase 9 — Browser + Computer Use + Polish. Phases 0-8 are complete.
 
 ## Completed Phases
 
@@ -64,6 +64,11 @@ Located in `docs/`: CLAW_CODE_ANALYSIS.md, SWIFT_PATTERNS.md, ADAPTATION_NOTES.m
 - TaskRunner: executes tasks through QueryEngine, logs results to disk
 - OrbitDaemon actor: configurable tick loop, daily log accumulation, task context passing
 - CLI commands: orbit run <slug>, orbit schedule list, orbit daemon status
+
+### Phase 8 — autoDream + Deep Tasks (243 tests)
+- DreamEngine: 4-phase consolidation (Orient → Gather → Consolidate → Prune)
+- DeepTask: background analysis with configurable model, cross-project, result storage
+- /dream and /deep slash commands, orbit deep CLI command
 
 ## Key Architecture Decisions
 

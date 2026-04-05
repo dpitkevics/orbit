@@ -26,6 +26,19 @@ public struct TopicContent: Codable, Sendable, Equatable {
     }
 }
 
+/// A recent transcript entry (full content, not a search snippet).
+public struct RecentTranscript: Sendable {
+    public let sessionID: String
+    public let content: String
+    public let timestamp: Date
+
+    public init(sessionID: String, content: String, timestamp: Date) {
+        self.sessionID = sessionID
+        self.content = content
+        self.timestamp = timestamp
+    }
+}
+
 /// A match from searching transcripts.
 public struct TranscriptMatch: Codable, Sendable {
     public let sessionID: String

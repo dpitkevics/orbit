@@ -239,6 +239,26 @@ public final class SQLiteMemory: MemoryStore, @unchecked Sendable {
         }
     }
 
+    /// Load recent transcripts ordered by timestamp descending (for DreamEngine orient phase).
+    public func recentTranscripts(project: String, limit: Int) async throws -> [RecentTranscript] {
+        try await dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT session_id, content, timestamp FROM transcripts
+                WHERE project = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """, arguments: [project, limit])
+            return rows.map {
+                let timestamp: Double = $0["timestamp"]
+                return RecentTranscript(
+                    sessionID: $0["session_id"],
+                    content: $0["content"],
+                    timestamp: Date(timeIntervalSince1970: timestamp)
+                )
+            }
+        }
+    }
+
     // MARK: - Context Assembly
 
     public func assembleContext(project: String, currentQuery: String, maxEntries: Int) async throws -> String {

@@ -124,6 +124,29 @@ struct Chat: AsyncParsableCommand {
                         .appendingPathComponent("orbit-export-\(session.sessionID.prefix(8)).md")
                     try transcript.write(to: exportPath, atomically: true, encoding: .utf8)
                     print("Exported to \(exportPath.path)\n")
+                case .dream:
+                    do {
+                        let memoryStore = try SQLiteMemory()
+                        let report = try await DreamEngine.dream(
+                            store: memoryStore,
+                            project: projectConfig.slug
+                        )
+                        print("Dream complete: \(report.observationsExtracted) observations, \(report.topicsCreated) created, \(report.topicsUpdated) updated\n")
+                    } catch {
+                        print("Dream failed: \(error.localizedDescription)\n")
+                    }
+                case .deep(let deepPrompt):
+                    let deepTask = DeepTask(
+                        name: "Deep Analysis",
+                        prompt: deepPrompt,
+                        projects: [projectConfig.slug]
+                    )
+                    let runner = DeepTaskRunner(provider: provider)
+                    let completed = try await runner.run(deepTask)
+                    if let result = completed.result {
+                        print(result)
+                    }
+                    print()
                 case .resume, .none:
                     print()
                 }

@@ -35,6 +35,8 @@ public enum SlashCommandAction: Sendable, Equatable {
     case switchModel(String)
     case export
     case resume(String?)
+    case dream
+    case deep(String)
 }
 
 /// Result from executing a slash command.
@@ -132,6 +134,8 @@ private func builtinSlashCommands() -> [SlashCommand] {
         ("status", "Current session status"),
         ("cost", "Show session token usage and cost"),
         ("model", "Show or switch active model"),
+        ("dream", "Trigger memory consolidation"),
+        ("deep", "Launch a deep analysis task"),
         ("compact", "Manually compact conversation history"),
         ("resume", "Resume a previous session"),
         ("export", "Export conversation transcript"),
@@ -178,6 +182,15 @@ private func builtinSlashCommands() -> [SlashCommand] {
                 return .action(.switchModel(newModel), output: "Switching to \(newModel)")
             }
             return .text("Current model: \(ctx.model)")
+        },
+
+        SlashCommand(name: "dream", description: "Trigger memory consolidation") { _, _ in
+            .action(.dream, output: "Starting autoDream consolidation...")
+        },
+
+        SlashCommand(name: "deep", description: "Launch a deep analysis task") { args, _ in
+            let prompt = args ?? "Analyze the current state of the project."
+            return .action(.deep(prompt), output: "Launching deep task...")
         },
 
         SlashCommand(name: "compact", description: "Manually compact conversation history") { _, _ in
