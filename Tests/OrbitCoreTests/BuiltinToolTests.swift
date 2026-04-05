@@ -358,10 +358,10 @@ struct BuiltinToolTests {
 
     // MARK: - builtinTools()
 
-    @Test("builtinTools returns all 6 tools")
+    @Test("builtinTools returns all 11 tools")
     func builtinToolsCount() {
         let tools = builtinTools()
-        #expect(tools.count == 6)
+        #expect(tools.count == 11)
 
         let names = Set(tools.map { $0.name })
         #expect(names.contains("bash"))
@@ -370,5 +370,10 @@ struct BuiltinToolTests {
         #expect(names.contains("file_edit"))
         #expect(names.contains("glob_search"))
         #expect(names.contains("grep_search"))
+        #expect(names.contains("web_fetch"))
+        #expect(names.contains("web_search"))
+        #expect(names.contains("git_log"))
+        #expect(names.contains("structured_output"))
+        #expect(names.contains("send_notification"))
     }
 }

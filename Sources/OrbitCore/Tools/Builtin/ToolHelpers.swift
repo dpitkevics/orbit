@@ -15,7 +15,7 @@ func shellQuote(_ s: String) -> String {
     "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
-/// Create a standard set of built-in tools.
+/// Create the standard set of built-in tools (without agent tool, which needs a provider).
 public func builtinTools() -> [any Tool] {
     [
         BashTool(),
@@ -24,5 +24,18 @@ public func builtinTools() -> [any Tool] {
         FileEditTool(),
         GlobSearchTool(),
         GrepSearchTool(),
+        WebFetchTool(),
+        WebSearchTool(),
+        GitLogTool(),
+        StructuredOutputTool(),
+        SendNotificationTool(),
     ]
+}
+
+/// Create the full tool set including the agent tool (requires provider).
+public func allTools(provider: any LLMProvider, policy: PermissionPolicy) -> [any Tool] {
+    var tools = builtinTools()
+    let agentToolPool = ToolPool(tools: builtinTools()) // agent gets basic tools
+    tools.append(AgentTool(provider: provider, toolPool: agentToolPool, policy: policy))
+    return tools
 }

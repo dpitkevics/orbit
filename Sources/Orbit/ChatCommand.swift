@@ -46,21 +46,52 @@ struct Chat: AsyncParsableCommand {
             globalConfig: globalConfig
         )
 
-        let tools: [any Tool] = noTools ? [] : builtinTools()
-        let toolPool = ToolPool(tools: tools)
+        // Tools
         let policy = PermissionPolicy(activeMode: .dangerFullAccess)
+        let tools: [any Tool] = noTools ? [] : allTools(provider: provider, policy: policy)
+        let toolPool = ToolPool(tools: tools)
         let commandRegistry = SlashCommandRegistry.default
+
+        // Memory
+        let memoryStore: SQLiteMemory? = try? SQLiteMemory(path: globalConfig.memoryDBPath)
+
+        // Skills
+        let skillLoader = SkillLoader()
+        let allSkills = skillLoader.loadSkills(project: projectConfig.slug)
+
+        // MCP — connect configured servers
+        let mcpRegistry = MCPRegistry()
+        let mcpConnector = MCPConnector(registry: mcpRegistry)
+        await connectMCPServers(config: globalConfig, project: projectConfig, connector: mcpConnector)
 
         // Session
         var session = Session()
         let sessionStore = FileSessionStore()
 
-        // Print header
-        print("Orbit v0.1.0 — \(projectConfig.name)")
-        print("Model: \(effectiveModel) | Provider: \(effectiveProvider)")
-        print("Type /help for commands, /exit to quit.\n")
+        // Build system prompt using ContextBuilder
+        let cwd = URL(fileURLWithPath: projectConfig.repoPath.map {
+            ($0 as NSString).expandingTildeInPath
+        } ?? FileManager.default.currentDirectoryPath)
+        let systemPrompt = await buildFullSystemPrompt(
+            project: projectConfig,
+            cwd: cwd,
+            memoryStore: memoryStore,
+            skills: allSkills,
+            mcpRegistry: mcpRegistry
+        )
 
-        let systemPrompt = buildChatSystemPrompt(project: projectConfig)
+        // Print header
+        let connectedMCP = await mcpRegistry.connectedCount
+        print("Orbit v0.1.0 — \(projectConfig.name)")
+        print("Model: \(effectiveModel) | Provider: \(effectiveProvider)", terminator: "")
+        if connectedMCP > 0 {
+            print(" | MCP: \(connectedMCP) server\(connectedMCP == 1 ? "" : "s")", terminator: "")
+        }
+        if !allSkills.isEmpty {
+            print(" | Skills: \(allSkills.count)", terminator: "")
+        }
+        print("\nType /help for commands, /exit to quit.\n")
+
         var messages: [ChatMessage] = []
         var totalUsage = TokenUsage.zero
         var currentModel = effectiveModel
@@ -71,12 +102,12 @@ struct Chat: AsyncParsableCommand {
             fflush(stdout)
 
             guard let input = readLine()?.trimmingCharacters(in: .whitespaces) else {
-                break // EOF
+                break
             }
 
             guard !input.isEmpty else { continue }
 
-            // Check for slash commands
+            // Slash commands
             let (cmdName, cmdArgs) = SlashCommandParser.parse(input)
             if let cmdName, let cmd = commandRegistry.find(cmdName) {
                 let ctx = SlashCommandContext(
@@ -95,7 +126,9 @@ struct Chat: AsyncParsableCommand {
 
                 switch result.action {
                 case .exit:
+                    await saveTranscript(messages: messages, session: session, store: memoryStore, project: projectConfig.slug)
                     try? sessionStore.save(session, project: projectConfig.slug)
+                    await mcpConnector.disconnectAll()
                     return
                 case .clearConversation:
                     messages.removeAll()
@@ -125,35 +158,61 @@ struct Chat: AsyncParsableCommand {
                     try transcript.write(to: exportPath, atomically: true, encoding: .utf8)
                     print("Exported to \(exportPath.path)\n")
                 case .dream:
-                    do {
-                        let memoryStore = try SQLiteMemory()
-                        let report = try await DreamEngine.dream(
-                            store: memoryStore,
-                            project: projectConfig.slug
-                        )
-                        print("Dream complete: \(report.observationsExtracted) observations, \(report.topicsCreated) created, \(report.topicsUpdated) updated\n")
-                    } catch {
-                        print("Dream failed: \(error.localizedDescription)\n")
+                    if let store = memoryStore {
+                        do {
+                            let report = try await DreamEngine.dream(store: store, project: projectConfig.slug)
+                            print("Dream complete: \(report.observationsExtracted) observations, \(report.topicsCreated) created, \(report.topicsUpdated) updated\n")
+                        } catch {
+                            print("Dream failed: \(error.localizedDescription)\n")
+                        }
+                    } else {
+                        print("Memory store not available.\n")
                     }
                 case .deep(let deepPrompt):
-                    let deepTask = DeepTask(
-                        name: "Deep Analysis",
-                        prompt: deepPrompt,
-                        projects: [projectConfig.slug]
-                    )
+                    let deepTask = DeepTask(name: "Deep Analysis", prompt: deepPrompt, projects: [projectConfig.slug])
                     let runner = DeepTaskRunner(provider: provider)
-                    let completed = try await runner.run(deepTask)
-                    if let result = completed.result {
-                        print(result)
+                    do {
+                        let completed = try await runner.run(deepTask)
+                        if let output = completed.result {
+                            print(output)
+                        }
+                    } catch {
+                        print("Deep task failed: \(error.localizedDescription)")
                     }
                     print()
-                case .resume, .none:
+                case .resume(let sessionID):
+                    if let sid = sessionID {
+                        do {
+                            let loaded = try sessionStore.load(id: sid, project: projectConfig.slug)
+                            session = loaded
+                            messages = loaded.messages
+                            totalUsage = .zero
+                            print("Resumed session \(sid.prefix(8)) (\(messages.count) messages)\n")
+                        } catch {
+                            print("Failed to resume: \(error.localizedDescription)\n")
+                        }
+                    } else {
+                        let list = (try? sessionStore.list(project: projectConfig.slug, limit: 10)) ?? []
+                        if list.isEmpty {
+                            print("No previous sessions.\n")
+                        } else {
+                            print("Recent sessions:")
+                            let formatter = DateFormatter()
+                            formatter.dateStyle = .short
+                            formatter.timeStyle = .short
+                            for s in list {
+                                print("  \(s.sessionID.prefix(8)) — \(s.messageCount) msgs, \(formatter.string(from: s.updatedAt))")
+                            }
+                            print("Use /resume <session-id> to resume.\n")
+                        }
+                    }
+                case .none:
                     print()
                 }
                 continue
             }
 
-            // Send to LLM via query engine
+            // Send to LLM
             messages.append(.userText(input))
             session.appendMessage(.userText(input))
 
@@ -168,7 +227,6 @@ struct Chat: AsyncParsableCommand {
             let stream = engine.run(messages: &messages, systemPrompt: systemPrompt)
 
             var hasOutput = false
-            var assistantText = ""
 
             do {
                 for try await event in stream {
@@ -177,7 +235,6 @@ struct Chat: AsyncParsableCommand {
                         print(text, terminator: "")
                         fflush(stdout)
                         hasOutput = true
-                        assistantText += text
 
                     case .toolCallStart(_, let name):
                         if hasOutput { print() }
@@ -209,10 +266,115 @@ struct Chat: AsyncParsableCommand {
                 print("\nError: \(error.localizedDescription)\n")
             }
 
-            // Save session periodically
+            // Save session after each turn
             try? sessionStore.save(session, project: projectConfig.slug)
         }
     }
+}
+
+// MARK: - System Prompt Builder
+
+private func buildFullSystemPrompt(
+    project: ProjectConfig,
+    cwd: URL,
+    memoryStore: SQLiteMemory?,
+    skills: [Skill],
+    mcpRegistry: MCPRegistry
+) async -> String {
+    let identity = """
+    You are Orbit, an AI operations assistant. You help manage projects, \
+    analyze business data, and handle operational tasks. You are NOT a coding \
+    agent — you are an operations manager. You have access to tools for \
+    file operations, shell commands, and search. Use them when needed.
+    """
+
+    // Discover ORBIT.md files
+    let instructionFiles = ContextBuilder.discoverInstructionFiles(at: cwd)
+
+    // Load memory context
+    var memoryContext: String? = nil
+    if let store = memoryStore {
+        memoryContext = try? await store.assembleContext(
+            project: project.slug,
+            currentQuery: "",
+            maxEntries: 20
+        )
+    }
+
+    // Format skills context
+    var skillsContext: String? = nil
+    if !skills.isEmpty {
+        let skillTexts = skills.map { "### \($0.name)\n\($0.content)" }
+        skillsContext = "# Available Skills\n\n" + skillTexts.joined(separator: "\n\n")
+    }
+
+    // Add MCP server info
+    let mcpTools = await mcpRegistry.toolDefinitions()
+    var mcpContext: String? = nil
+    if !mcpTools.isEmpty {
+        let toolNames = mcpTools.map { $0.name }.joined(separator: ", ")
+        mcpContext = "Connected MCP tools: \(toolNames)"
+    }
+
+    // Add coding awareness if repo configured
+    var codingContext: String? = nil
+    if project.repoPath != nil {
+        let commits = CodingAwareness.recentCommits(repo: cwd, days: 7)
+        if !commits.isEmpty {
+            codingContext = CodingAwareness.formatCommitsContext(commits: commits)
+        }
+    }
+
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+
+    let builder = ContextBuilder(
+        identity: identity,
+        projectContext: ProjectContext(
+            projectName: project.name,
+            projectDescription: project.description,
+            instructionFiles: instructionFiles
+        ),
+        skillsContext: [skillsContext, mcpContext, codingContext].compactMap { $0 }.joined(separator: "\n\n"),
+        memoryContext: memoryContext,
+        currentDate: formatter.string(from: Date())
+    )
+
+    return builder.build()
+}
+
+// MARK: - MCP Connection
+
+private func connectMCPServers(
+    config: OrbitConfig,
+    project: ProjectConfig,
+    connector: MCPConnector
+) async {
+    // MCP servers would be configured in project TOML under [mcps.*]
+    // For now, we just initialize — actual config parsing for MCP servers
+    // would read from the TOML and call connector.connect() for each
+}
+
+// MARK: - Transcript Saving
+
+private func saveTranscript(
+    messages: [ChatMessage],
+    session: Session,
+    store: SQLiteMemory?,
+    project: String
+) async {
+    guard let store, !messages.isEmpty else { return }
+
+    let transcript = messages.map { msg -> String in
+        let role = msg.role.rawValue.capitalized
+        return "[\(role)] \(msg.textContent)"
+    }.joined(separator: "\n")
+
+    try? await store.storeTranscript(
+        sessionID: session.sessionID,
+        content: transcript,
+        project: project
+    )
 }
 
 // MARK: - Helpers
@@ -223,27 +385,6 @@ private func resolveDefaultProject(_ config: OrbitConfig) -> String {
         return projects[0]
     }
     return "default"
-}
-
-private func buildChatSystemPrompt(project: ProjectConfig) -> String {
-    var parts: [String] = []
-
-    parts.append("""
-    You are Orbit, an AI operations assistant. You help manage projects, \
-    analyze business data, and handle operational tasks. You are NOT a coding \
-    agent — you are an operations manager. You have access to tools for \
-    file operations, shell commands, and search. Use them when needed.
-    """)
-
-    if !project.description.isEmpty {
-        parts.append("Project: \(project.name)\n\(project.description)")
-    }
-
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd"
-    parts.append("Today's date: \(formatter.string(from: Date())).")
-
-    return parts.joined(separator: "\n\n")
 }
 
 /// Terminal permission prompter (shared with Ask command).

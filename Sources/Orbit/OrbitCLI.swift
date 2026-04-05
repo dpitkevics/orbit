@@ -66,11 +66,20 @@ struct Ask: AsyncParsableCommand {
             globalConfig: globalConfig
         )
 
-        let systemPrompt = buildAskSystemPrompt(project: projectConfig)
+        // Build full system prompt with context, memory, skills
+        let cwd = URL(fileURLWithPath: projectConfig.repoPath.map {
+            ($0 as NSString).expandingTildeInPath
+        } ?? FileManager.default.currentDirectoryPath)
+        let memoryStore: SQLiteMemory? = try? SQLiteMemory(path: globalConfig.memoryDBPath)
+        let skillLoader = SkillLoader()
+        let skills = skillLoader.loadSkills(project: projectConfig.slug)
+        let systemPrompt = await buildFullAskSystemPrompt(
+            project: projectConfig, cwd: cwd, memoryStore: memoryStore, skills: skills
+        )
 
-        let tools: [any Tool] = noTools ? [] : builtinTools()
-        let toolPool = ToolPool(tools: tools)
         let policy = PermissionPolicy(activeMode: .dangerFullAccess)
+        let tools: [any Tool] = noTools ? [] : allTools(provider: provider, policy: policy)
+        let toolPool = ToolPool(tools: tools)
 
         let engine = QueryEngine(
             provider: provider,
@@ -139,19 +148,44 @@ struct Ask: AsyncParsableCommand {
 
 // MARK: - Helpers
 
-private func buildAskSystemPrompt(project: ProjectConfig) -> String {
-    var parts: [String] = []
-    parts.append("""
+private func buildFullAskSystemPrompt(
+    project: ProjectConfig,
+    cwd: URL,
+    memoryStore: SQLiteMemory?,
+    skills: [Skill]
+) async -> String {
+    let identity = """
     You are Orbit, an AI operations assistant. You help manage projects, \
     analyze business data, and handle operational tasks. You are NOT a coding \
     agent — you are an operations manager. You have access to tools for \
     file operations, shell commands, and search. Use them when needed.
-    """)
-    if !project.description.isEmpty {
-        parts.append("Project: \(project.name)\n\(project.description)")
+    """
+
+    let instructionFiles = ContextBuilder.discoverInstructionFiles(at: cwd)
+
+    var memoryContext: String? = nil
+    if let store = memoryStore {
+        memoryContext = try? await store.assembleContext(project: project.slug, currentQuery: "", maxEntries: 20)
     }
+
+    var skillsContext: String? = nil
+    if !skills.isEmpty {
+        let texts = skills.map { "### \($0.name)\n\($0.content)" }
+        skillsContext = "# Available Skills\n\n" + texts.joined(separator: "\n\n")
+    }
+
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd"
-    parts.append("Today's date: \(formatter.string(from: Date())).")
-    return parts.joined(separator: "\n\n")
+
+    return ContextBuilder(
+        identity: identity,
+        projectContext: ProjectContext(
+            projectName: project.name,
+            projectDescription: project.description,
+            instructionFiles: instructionFiles
+        ),
+        skillsContext: skillsContext,
+        memoryContext: memoryContext,
+        currentDate: formatter.string(from: Date())
+    ).build()
 }
