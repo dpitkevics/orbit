@@ -29,6 +29,9 @@ let package = Package(
 
         // MCP
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
+
+        // Terminal
+        .package(url: "https://github.com/andybest/linenoise-swift.git", from: "0.0.3"),
     ],
     targets: [
         // CLI executable
@@ -37,6 +40,7 @@ let package = Package(
             dependencies: [
                 "OrbitCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "LineNoise", package: "linenoise-swift"),
                 .product(name: "Logging", package: "swift-log"),
             ]
         ),

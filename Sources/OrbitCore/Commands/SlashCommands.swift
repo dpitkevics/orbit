@@ -39,6 +39,7 @@ public enum SlashCommandAction: Sendable, Equatable {
     case deep(String)
     case memory
     case switchProject(String)
+    case attach(String)
 }
 
 /// Result from executing a slash command.
@@ -139,6 +140,7 @@ private func builtinSlashCommands() -> [SlashCommand] {
         ("memory", "Show memory topics for current project"),
         ("dream", "Trigger memory consolidation"),
         ("deep", "Launch a deep analysis task"),
+        ("attach", "Attach a file or image to the next message"),
         ("trace", "Show agent trace for current session"),
         ("project", "Show or switch project"),
         ("config", "Show current configuration"),
@@ -198,6 +200,13 @@ private func builtinSlashCommands() -> [SlashCommand] {
         SlashCommand(name: "deep", description: "Launch a deep analysis task") { args, _ in
             let prompt = args ?? "Analyze the current state of the project."
             return .action(.deep(prompt), output: "Launching deep task...")
+        },
+
+        SlashCommand(name: "attach", description: "Attach a file or image to the next message") { args, _ in
+            guard let path = args?.trimmingCharacters(in: .whitespaces), !path.isEmpty else {
+                return .text("Usage: /attach <file-path>")
+            }
+            return .action(.attach(path), output: "Attached: \(path)")
         },
 
         SlashCommand(name: "memory", description: "Show memory topics for current project") { _, ctx in

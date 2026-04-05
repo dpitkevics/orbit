@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import LineNoise
 import OrbitCore
 
 /// Interactive REPL session — the primary interface for Orbit.
@@ -16,6 +17,12 @@ struct Chat: AsyncParsableCommand {
 
     @Option(name: .long, help: "Auth mode: 'apiKey' or 'bridge'.")
     var authMode: String?
+
+    @Option(name: .long, help: "Attach text files to context.")
+    var file: [String] = []
+
+    @Option(name: .long, help: "Attach images (base64-encoded for vision).")
+    var image: [String] = []
 
     @Flag(name: .long, help: "Disable tool use.")
     var noTools: Bool = false
@@ -80,28 +87,83 @@ struct Chat: AsyncParsableCommand {
             mcpRegistry: mcpRegistry
         )
 
+        // Terminal rendering
+        let theme = ColorTheme.default
+        let renderer = TerminalRenderer(theme: theme)
+        let useRichRendering = TerminalDetector.isInteractive
+
         // Print header
         let connectedMCP = await mcpRegistry.connectedCount
-        print("Orbit v0.1.0 — \(projectConfig.name)")
-        print("Model: \(effectiveModel) | Provider: \(effectiveProvider)", terminator: "")
+        print(ANSI.colored("Orbit v0.1.0", ANSI.bold) + " — \(projectConfig.name)")
+        print(ANSI.colored("Model:", theme.dim) + " \(effectiveModel) " +
+              ANSI.colored("Provider:", theme.dim) + " \(effectiveProvider)", terminator: "")
         if connectedMCP > 0 {
-            print(" | MCP: \(connectedMCP) server\(connectedMCP == 1 ? "" : "s")", terminator: "")
+            print(" " + ANSI.colored("MCP:", theme.dim) + " \(connectedMCP)", terminator: "")
         }
         if !allSkills.isEmpty {
-            print(" | Skills: \(allSkills.count)", terminator: "")
+            print(" " + ANSI.colored("Skills:", theme.dim) + " \(allSkills.count)", terminator: "")
         }
-        print("\nType /help for commands, /exit to quit.\n")
+        print("\n" + ANSI.colored("Type /help for commands, /exit to quit.", theme.dim) + "\n")
+
+        // LineNoise editor with history + tab completion
+        let ln = LineNoise()
+        let historyPath = ConfigLoader.orbitHome.appendingPathComponent("history").path
+        try? ln.loadHistory(fromFile: historyPath)
+
+        // Slash command tab completion
+        let slashCommands = commandRegistry.allCommands().map { "/\($0.name)" }
+        ln.setCompletionCallback { buffer in
+            if buffer.hasPrefix("/") {
+                return slashCommands.filter { $0.hasPrefix(buffer) }
+            }
+            return []
+        }
+
+        // Hints for slash commands
+        ln.setHintsCallback { buffer in
+            if buffer.hasPrefix("/") && !buffer.contains(" ") {
+                if let match = slashCommands.first(where: { $0.hasPrefix(buffer) && $0 != buffer }) {
+                    let hint = String(match.dropFirst(buffer.count))
+                    return (hint, (127, 127, 127))
+                }
+            }
+            return (nil, nil)
+        }
 
         var messages: [ChatMessage] = []
         var totalUsage = TokenUsage.zero
+        var pendingAttachments: [ContentBlock] = []
+
+        // Load initial file/image attachments from CLI flags
+        for filePath in file {
+            if let block = loadFileAttachment(path: filePath) {
+                pendingAttachments.append(block)
+                print(ANSI.colored("  Attached: \(filePath)", theme.dim))
+            }
+        }
+        for imagePath in image {
+            if let block = loadImageAttachment(path: imagePath) {
+                pendingAttachments.append(block)
+                print(ANSI.colored("  Attached image: \(imagePath)", theme.dim))
+            }
+        }
         var currentModel = effectiveModel
 
         // REPL loop
         while true {
-            print("▸ ", terminator: "")
-            fflush(stdout)
-
-            guard let input = readLine()?.trimmingCharacters(in: .whitespaces) else {
+            let input: String
+            do {
+                let line = try ln.getLine(prompt: "\(theme.prompt)▸\(ANSI.reset) ")
+                input = line.trimmingCharacters(in: .whitespaces)
+                if !input.isEmpty {
+                    ln.addHistory(input)
+                    try? ln.saveHistory(toFile: historyPath)
+                }
+            } catch LinenoiseError.CTRL_C {
+                continue // Cancel current input
+            } catch LinenoiseError.EOF {
+                break // Ctrl+D exits
+            } catch {
                 break
             }
 
@@ -224,15 +286,26 @@ struct Chat: AsyncParsableCommand {
                 case .switchProject(let newProject):
                     print("Project switching requires restarting the session.")
                     print("Run: orbit chat \(newProject)\n")
+                case .attach(let path):
+                    if let block = loadFileAttachment(path: path) ?? loadImageAttachment(path: path) {
+                        pendingAttachments.append(block)
+                    } else {
+                        print("Could not read file: \(path)\n")
+                    }
                 case .none:
                     print()
                 }
                 continue
             }
 
-            // Send to LLM
-            messages.append(.userText(input))
-            session.appendMessage(.userText(input))
+            // Send to LLM (include any pending attachments)
+            var userBlocks: [ContentBlock] = [.text(input)]
+            userBlocks.append(contentsOf: pendingAttachments)
+            pendingAttachments.removeAll()
+
+            let userMsg = ChatMessage(role: .user, blocks: userBlocks)
+            messages.append(userMsg)
+            session.appendMessage(userMsg)
 
             let engine = QueryEngine(
                 provider: provider,
@@ -244,44 +317,80 @@ struct Chat: AsyncParsableCommand {
 
             let stream = engine.run(messages: &messages, systemPrompt: systemPrompt)
 
+            var streamState = MarkdownStreamState(renderer: renderer)
+            var toolSpinner = Spinner(theme: theme)
             var hasOutput = false
 
             do {
                 for try await event in stream {
                     switch event {
                     case .textDelta(let text):
-                        print(text, terminator: "")
-                        fflush(stdout)
+                        if useRichRendering {
+                            // Accumulate and render at safe boundaries
+                            if let rendered = streamState.push(text) {
+                                print(rendered, terminator: "")
+                                fflush(stdout)
+                            }
+                        } else {
+                            print(text, terminator: "")
+                            fflush(stdout)
+                        }
                         hasOutput = true
 
                     case .toolCallStart(_, let name):
-                        if hasOutput { print() }
-                        print("  ▶ \(name)", terminator: "")
-                        fflush(stdout)
+                        if hasOutput {
+                            // Flush pending markdown
+                            if let remaining = streamState.flush() {
+                                print(remaining, terminator: "")
+                            }
+                            print()
+                        }
+                        toolSpinner.tick(label: ANSI.colored(name, theme.toolName))
 
                     case .toolCallEnd(_, let name, let result):
                         if result.isError {
-                            print(" ✗ \(name)")
+                            toolSpinner.fail(label: "\(ANSI.colored(name, theme.toolName)) failed")
                         } else {
-                            let preview = result.output.prefix(60).replacingOccurrences(of: "\n", with: " ")
-                            print(" ✓ (\(preview)...)")
+                            let preview = String(result.output.prefix(60))
+                                .replacingOccurrences(of: "\n", with: " ")
+                            toolSpinner.finish(label: "\(ANSI.colored(name, theme.toolName)) \(ANSI.colored("(\(preview))", theme.dim))")
                         }
 
                     case .toolDenied(let name, let reason):
-                        print("  ⊘ \(name) denied: \(reason)")
+                        toolSpinner.skip(label: "\(name) denied: \(reason)")
 
                     case .usageUpdate(let usage):
                         totalUsage += usage
 
                     case .turnComplete(let summary):
-                        if hasOutput { print("\n") }
-                        if summary.toolCallCount > 0 {
-                            print("[\(summary.iterations) turn\(summary.iterations == 1 ? "" : "s"), \(summary.toolCallCount) tool call\(summary.toolCallCount == 1 ? "" : "s")]")
+                        // Flush any remaining markdown
+                        if let remaining = streamState.flush() {
+                            print(remaining, terminator: "")
                         }
+                        if hasOutput { print() }
+
+                        // Show turn summary
+                        if summary.toolCallCount > 0 {
+                            let info = ANSI.colored(
+                                "[\(summary.iterations) turn\(summary.iterations == 1 ? "" : "s"), \(summary.toolCallCount) tool call\(summary.toolCallCount == 1 ? "" : "s")]",
+                                theme.dim
+                            )
+                            print(info)
+                        }
+
+                        // Show usage
+                        if totalUsage.totalTokens > 0 {
+                            let cost = provider.estimateCost(usage: totalUsage)
+                            print(ANSI.colored(
+                                "\(totalUsage.inputTokens)↑ \(totalUsage.outputTokens)↓ \(cost.formattedUSD)",
+                                theme.dim
+                            ))
+                        }
+                        print()
                     }
                 }
             } catch {
-                print("\nError: \(error.localizedDescription)\n")
+                print("\n\(ANSI.colored("Error:", ANSI.red)) \(error.localizedDescription)\n")
             }
 
             // Save session after each turn
@@ -419,4 +528,58 @@ struct TerminalPrompter: PermissionPrompter {
         guard let line = readLine()?.lowercased() else { return false }
         return line == "y" || line == "yes"
     }
+}
+
+// MARK: - File/Image Attachment Helpers
+
+/// Load a text file as a document content block.
+private func loadFileAttachment(path: String) -> ContentBlock? {
+    let expanded = (path as NSString).expandingTildeInPath
+    guard FileManager.default.fileExists(atPath: expanded) else { return nil }
+
+    let ext = (expanded as NSString).pathExtension.lowercased()
+    let imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
+    guard !imageExtensions.contains(ext) else { return nil } // Not a text file
+
+    guard let data = FileManager.default.contents(atPath: expanded),
+          let content = String(data: data, encoding: .utf8) else { return nil }
+
+    let filename = (expanded as NSString).lastPathComponent
+    let mediaType: String = switch ext {
+    case "md": "text/markdown"
+    case "json": "application/json"
+    case "toml": "application/toml"
+    case "yaml", "yml": "text/yaml"
+    case "csv": "text/csv"
+    default: "text/plain"
+    }
+
+    // Truncate very large files
+    let maxChars = 50_000
+    let truncated = content.count > maxChars
+        ? String(content.prefix(maxChars)) + "\n... (truncated, \(content.count) total chars)"
+        : content
+
+    return .document(name: filename, mediaType: mediaType, content: truncated)
+}
+
+/// Load an image file as a base64 image content block.
+private func loadImageAttachment(path: String) -> ContentBlock? {
+    let expanded = (path as NSString).expandingTildeInPath
+    guard FileManager.default.fileExists(atPath: expanded) else { return nil }
+
+    let ext = (expanded as NSString).pathExtension.lowercased()
+    let mediaType: String
+    switch ext {
+    case "png": mediaType = "image/png"
+    case "gif": mediaType = "image/gif"
+    case "webp": mediaType = "image/webp"
+    case "jpg", "jpeg": mediaType = "image/jpeg"
+    default: return nil
+    }
+
+    guard let data = FileManager.default.contents(atPath: expanded) else { return nil }
+    let base64 = data.base64EncodedString()
+
+    return .image(source: .base64(mediaType: mediaType, data: base64))
 }

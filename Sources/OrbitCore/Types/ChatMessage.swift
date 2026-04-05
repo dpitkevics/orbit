@@ -11,11 +11,19 @@ public enum MessageRole: String, Codable, Sendable {
 
 // MARK: - Content Block
 
+/// Source for an image attachment.
+public enum ImageSource: Sendable, Equatable, Codable {
+    case base64(mediaType: String, data: String)
+    case url(String)
+}
+
 public enum ContentBlock: Sendable, Equatable {
     case text(String)
     case toolUse(id: String, name: String, input: JSONValue)
     case toolResult(toolUseId: String, toolName: String, output: String, isError: Bool)
     case thinking(content: String, signature: String?)
+    case image(source: ImageSource)
+    case document(name: String, mediaType: String, content: String)
 }
 
 // MARK: - Chat Message
@@ -90,6 +98,8 @@ public struct ChatMessage: Sendable {
             case .toolUse(_, let name, _): return sum + name.count + 100
             case .toolResult(_, _, let output, _): return sum + output.count
             case .thinking(let content, _): return sum + content.count
+            case .image: return sum + 1000 // Images are ~1K tokens estimate
+            case .document(_, _, let content): return sum + content.count
             }
         }
         return max(1, charCount / 4)
@@ -102,7 +112,7 @@ extension ContentBlock: Codable {
     private enum CodingKeys: String, CodingKey {
         case type, text, id, name, input, toolUseId = "tool_use_id"
         case toolName = "tool_name", output, isError = "is_error"
-        case content, signature
+        case content, signature, source, mediaType = "media_type", data
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +138,14 @@ extension ContentBlock: Codable {
             let content = try container.decode(String.self, forKey: .content)
             let signature = try container.decodeIfPresent(String.self, forKey: .signature)
             self = .thinking(content: content, signature: signature)
+        case "image":
+            let source = try container.decode(ImageSource.self, forKey: .source)
+            self = .image(source: source)
+        case "document":
+            let name = try container.decode(String.self, forKey: .name)
+            let mediaType = try container.decode(String.self, forKey: .mediaType)
+            let content = try container.decode(String.self, forKey: .content)
+            self = .document(name: name, mediaType: mediaType, content: content)
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown content block type: \(type)")
         }
@@ -154,6 +172,14 @@ extension ContentBlock: Codable {
             try container.encode("thinking", forKey: .type)
             try container.encode(content, forKey: .content)
             try container.encodeIfPresent(signature, forKey: .signature)
+        case .image(let source):
+            try container.encode("image", forKey: .type)
+            try container.encode(source, forKey: .source)
+        case .document(let name, let mediaType, let content):
+            try container.encode("document", forKey: .type)
+            try container.encode(name, forKey: .name)
+            try container.encode(mediaType, forKey: .mediaType)
+            try container.encode(content, forKey: .content)
         }
     }
 }

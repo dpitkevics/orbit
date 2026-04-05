@@ -151,6 +151,22 @@ public struct AnthropicProvider: LLMProvider, @unchecked Sendable {
                     return .text(text)
                 case .toolResult(let toolUseId, _, let output, let isError):
                     return .toolResult(toolUseId, output, isError ? true : nil, nil)
+                case .image(let source):
+                    switch source {
+                    case .base64(let mediaType, let data):
+                        let type: MessageParameter.Message.Content.ImageSource.MediaType =
+                            switch mediaType {
+                            case "image/png": .png
+                            case "image/gif": .gif
+                            case "image/webp": .webp
+                            default: .jpeg
+                            }
+                        return .image(.init(type: .base64, mediaType: type, data: data))
+                    case .url:
+                        return nil
+                    }
+                case .document(_, _, let docContent):
+                    return .text("[Document]\n\(docContent)")
                 default:
                     return nil
                 }

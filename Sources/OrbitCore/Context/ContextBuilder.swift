@@ -17,15 +17,59 @@ public struct ProjectContext: Sendable {
     public let projectName: String
     public let projectDescription: String
     public let instructionFiles: [ContextFile]
+    public let gitStatus: String?
+    public let gitDiff: String?
 
     public init(
         projectName: String,
         projectDescription: String = "",
-        instructionFiles: [ContextFile] = []
+        instructionFiles: [ContextFile] = [],
+        gitStatus: String? = nil,
+        gitDiff: String? = nil
     ) {
         self.projectName = projectName
         self.projectDescription = projectDescription
         self.instructionFiles = instructionFiles
+        self.gitStatus = gitStatus
+        self.gitDiff = gitDiff
+    }
+
+    /// Discover git status and diff for a repo.
+    public static func withGit(
+        projectName: String,
+        projectDescription: String = "",
+        instructionFiles: [ContextFile] = [],
+        repoPath: URL
+    ) -> ProjectContext {
+        let status = runGitCommand(["status", "--short"], at: repoPath)
+        let diff = runGitCommand(["diff", "--stat"], at: repoPath)
+
+        return ProjectContext(
+            projectName: projectName,
+            projectDescription: projectDescription,
+            instructionFiles: instructionFiles,
+            gitStatus: status?.isEmpty == true ? nil : status,
+            gitDiff: diff?.isEmpty == true ? nil : diff
+        )
+    }
+
+    private static func runGitCommand(_ args: [String], at repo: URL) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = repo
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
     }
 }
 
@@ -77,6 +121,14 @@ public struct ContextBuilder: Sendable {
         // 3. Instruction files (ORBIT.md)
         for file in projectContext.instructionFiles {
             sections.append(file.content)
+        }
+
+        // 3.5. Git status/diff (if available)
+        if let status = projectContext.gitStatus {
+            sections.append("# Git Status\n```\n\(status)\n```")
+        }
+        if let diff = projectContext.gitDiff {
+            sections.append("# Git Diff (stat)\n```\n\(diff)\n```")
         }
 
         // 4. Skills
