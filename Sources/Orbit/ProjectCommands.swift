@@ -170,11 +170,51 @@ struct MemoryList: AsyncParsableCommand {
 
 // MARK: - orbit auth
 
-struct Auth: ParsableCommand {
+struct Auth: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage authentication.",
-        subcommands: [AuthStatus.self]
+        subcommands: [AuthStatus.self, AuthLogin.self]
     )
+}
+
+struct AuthLogin: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "login",
+        abstract: "Authenticate via OAuth PKCE (opens browser)."
+    )
+
+    @Option(name: .long, help: "OAuth authorize URL.")
+    var authorizeUrl: String = "https://console.anthropic.com/oauth/authorize"
+
+    @Option(name: .long, help: "OAuth token exchange URL.")
+    var tokenUrl: String = "https://console.anthropic.com/oauth/token"
+
+    @Option(name: .long, help: "OAuth client ID.")
+    var clientId: String = "orbit-cli"
+
+    @Option(name: .long, help: "Callback port (default: 9876).")
+    var port: Int = 9876
+
+    func run() async throws {
+        let manager = OAuthManager()
+        print("Starting OAuth PKCE login flow...")
+
+        let tokenSet = try await manager.login(
+            authorizeURL: authorizeUrl,
+            tokenURL: tokenUrl,
+            clientID: clientId,
+            scopes: ["read", "write"],
+            callbackPort: UInt16(port)
+        )
+
+        print("Authenticated successfully!")
+        if let expiresAt = tokenSet.expiresAt {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            print("Token expires: \(formatter.string(from: expiresAt))")
+        }
+    }
 }
 
 struct AuthStatus: ParsableCommand {

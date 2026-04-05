@@ -37,7 +37,8 @@ func resolveProviderForChat(
         return BridgeProvider(name: providerName, cliPath: cliPath, model: model)
 
     case .oauth:
-        throw AuthError.unsupportedAuthMode(.oauth)
+        let token = try resolveOAuthToken(provider: providerName, authConfig: authConfig)
+        return AnthropicProvider(apiKey: token, model: model)
     }
 }
 
@@ -98,5 +99,26 @@ private func resolveCLIPath(provider: String, authConfig: AuthConfig?) throws ->
 
     throw ProviderError.authenticationFailed(
         "No CLI tool found for '\(provider)'. Install the CLI or set cli_path in config."
+    )
+}
+
+private func resolveOAuthToken(provider: String, authConfig: AuthConfig?) throws -> String {
+    // Try loading from Orbit's credential store
+    let credPath = authConfig?.credentialsPath ?? "~/.orbit/credentials.json"
+    let manager = OAuthManager(credentialsPath: credPath)
+
+    if let tokenSet = manager.loadCredentials(), !tokenSet.isExpired {
+        return tokenSet.accessToken
+    }
+
+    // Try loading from Claude Code's credentials
+    if provider == "anthropic", let tokenSet = OAuthManager.loadFromClaudeCode(), !tokenSet.isExpired {
+        // Cache it in Orbit's store
+        try? manager.saveCredentials(tokenSet)
+        return tokenSet.accessToken
+    }
+
+    throw AuthError.invalidCredentials(
+        "No valid OAuth token found. Run `orbit auth login` to authenticate."
     )
 }
