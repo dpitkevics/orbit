@@ -8,7 +8,12 @@ struct OrbitCLI: AsyncParsableCommand {
         commandName: "orbit",
         abstract: "LLM-agnostic agent platform for project operations.",
         version: "0.1.0",
-        subcommands: [Chat.self, Ask.self, Run.self, Deep.self, Schedule.self, Daemon.self],
+        subcommands: [
+            Chat.self, Ask.self, Run.self, Deep.self,
+            Init.self, Project.self, Memory.self,
+            Schedule.self, Daemon.self,
+            Auth.self, Status.self,
+        ],
         defaultSubcommand: Chat.self
     )
 }

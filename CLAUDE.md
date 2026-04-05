@@ -4,7 +4,7 @@ Read ORBIT_PROJECT_SPEC.md for the full project specification.
 
 ## Current Phase
 
-Phase 9 — Browser + Computer Use + Polish. Phases 0-8 are complete.
+All 10 phases (0-9) are complete. 256 tests, 0 warnings.
 
 ## Completed Phases
 
@@ -69,6 +69,13 @@ Located in `docs/`: CLAW_CODE_ANALYSIS.md, SWIFT_PATTERNS.md, ADAPTATION_NOTES.m
 - DreamEngine: 4-phase consolidation (Orient → Gather → Consolidate → Prune)
 - DeepTask: background analysis with configurable model, cross-project, result storage
 - /dream and /deep slash commands, orbit deep CLI command
+
+### Phase 9 — Coding Awareness, Delegation, CLI Polish (256 tests)
+- CodingAwareness: git log, repo structure scanning, file reading for operational context
+- CodingDelegate: detect/delegate to Claude Code and Codex CLI, branch management
+- orbit init wizard: creates ~/.orbit/ structure, detects auth, first project setup
+- Full CLI: orbit project list/show, orbit memory search/list, orbit auth status, orbit status
+- 13 new tests for coding awareness, delegation, agent detection
 
 ## Key Architecture Decisions
 
