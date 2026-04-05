@@ -36,6 +36,7 @@ public struct ProjectConfig: Sendable {
     public let provider: String?
     public let model: String?
     public let contextFiles: [String]
+    public let mcpServers: [MCPServerConfig]
 
     public init(
         name: String,
@@ -44,7 +45,8 @@ public struct ProjectConfig: Sendable {
         repoPath: String? = nil,
         provider: String? = nil,
         model: String? = nil,
-        contextFiles: [String] = []
+        contextFiles: [String] = [],
+        mcpServers: [MCPServerConfig] = []
     ) {
         self.name = name
         self.slug = slug
@@ -53,6 +55,7 @@ public struct ProjectConfig: Sendable {
         self.provider = provider
         self.model = model
         self.contextFiles = contextFiles
+        self.mcpServers = mcpServers
     }
 
     /// Resolve the effective model, falling back to the global config.
@@ -209,6 +212,39 @@ public struct ConfigLoader: Sendable {
             }
         }
 
+        // Parse MCP servers from [mcps.*]
+        var mcpServers: [MCPServerConfig] = []
+        if let mcpsTable = table["mcps"]?.table {
+            for serverName in mcpsTable.keys {
+                if let serverTable = mcpsTable[serverName]?.table {
+                    let transportStr = serverTable["type"]?.string ?? "http"
+                    let transport: MCPTransportType = switch transportStr {
+                    case "stdio": .stdio
+                    case "sse": .sse
+                    default: .http
+                    }
+
+                    var headers: [String: String] = [:]
+                    if let headersTable = serverTable["headers"]?.table {
+                        for key in headersTable.keys {
+                            if let val = headersTable[key]?.string {
+                                headers[key] = val
+                            }
+                        }
+                    }
+
+                    mcpServers.append(MCPServerConfig(
+                        name: serverName,
+                        transport: transport,
+                        command: serverTable["command"]?.string,
+                        args: nil,
+                        url: serverTable["url"]?.string,
+                        headers: headers.isEmpty ? nil : headers
+                    ))
+                }
+            }
+        }
+
         return ProjectConfig(
             name: name,
             slug: slug,
@@ -216,7 +252,8 @@ public struct ConfigLoader: Sendable {
             repoPath: repo,
             provider: provider,
             model: model,
-            contextFiles: contextFiles
+            contextFiles: contextFiles,
+            mcpServers: mcpServers
         )
     }
 }

@@ -221,6 +221,9 @@ struct Chat: AsyncParsableCommand {
                             print("Use /resume <session-id> to resume.\n")
                         }
                     }
+                case .switchProject(let newProject):
+                    print("Project switching requires restarting the session.")
+                    print("Run: orbit chat \(newProject)\n")
                 case .none:
                     print()
                 }
@@ -365,9 +368,13 @@ private func connectMCPServers(
     project: ProjectConfig,
     connector: MCPConnector
 ) async {
-    // MCP servers would be configured in project TOML under [mcps.*]
-    // For now, we just initialize — actual config parsing for MCP servers
-    // would read from the TOML and call connector.connect() for each
+    for serverConfig in project.mcpServers {
+        do {
+            try await connector.connect(config: serverConfig)
+        } catch {
+            print("  MCP '\(serverConfig.name)': failed to connect (\(error.localizedDescription))")
+        }
+    }
 }
 
 // MARK: - Transcript Saving

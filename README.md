@@ -7,7 +7,7 @@ Orbit is a CLI-first tool that acts as a solo founder's chief of staff. It knows
 [![Swift 6.0+](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
 [![macOS 14+](https://img.shields.io/badge/macOS-14+-blue.svg)](https://www.apple.com/macos)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: 256](https://img.shields.io/badge/Tests-256%20passing-brightgreen.svg)]()
+[![Tests: 294](https://img.shields.io/badge/Tests-294%20passing-brightgreen.svg)]()
 
 ---
 
@@ -20,16 +20,20 @@ Orbit is an **operations agent**, not a coding agent. It manages projects, analy
 ### Key Features
 
 - **LLM-agnostic** — Works with Anthropic (Claude), OpenAI (GPT-4o, o3), or any provider
+- **3 auth modes** — API key, bridge (uses your existing Claude/Codex CLI subscription), OAuth PKCE
 - **Multi-project** — Manages multiple projects with isolated memory, context, and config
-- **Tool system** — 6 built-in tools (bash, file read/write/edit, glob, grep) with permission-gated execution
+- **14 built-in tools** — bash, file read/write/edit, glob, grep, web fetch/search, browser, computer use, git log, agent spawning, structured output, notifications
 - **3-layer memory** — SQLite-backed with FTS5 search, optional vector embeddings for semantic retrieval
+- **Memory consolidation** — autoDream: 4-phase cycle that merges observations, resolves contradictions, prunes stale facts
 - **Scheduled tasks** — Cron-based task execution with TOML configuration
 - **Agent tree** — Hierarchical sub-agent spawning with depth limits and full trace visibility
 - **MCP integration** — Connect to external services via the Model Context Protocol
-- **Memory consolidation** — autoDream: 4-phase cycle that merges observations, resolves contradictions, prunes stale facts
 - **Deep analysis** — Long-running background tasks spanning multiple projects
 - **Coding delegation** — Delegates code changes to Claude Code or Codex CLI
-- **Interactive REPL** — Streaming chat with slash commands, session persistence, cost tracking
+- **Interactive REPL** — Streaming chat with 16 slash commands, session persistence, cost tracking
+- **Background daemon** — Proactive monitoring with launchd integration
+- **Plugin system** — Extensible plugin architecture for custom tools and integrations
+- **Desktop automation** — Browser control and computer use (screenshot, mouse, keyboard)
 
 ---
 
@@ -38,7 +42,7 @@ Orbit is an **operations agent**, not a coding agent. It manages projects, analy
 ```
                     +-------------------------+
                     |      orbit CLI          |
-                    |  (ArgumentParser)       |
+                    |  (17 subcommands)       |
                     +-----------+-------------+
                                 |
               +-----------------+-----------------+
@@ -65,7 +69,7 @@ Orbit is an **operations agent**, not a coding agent. It manages projects, analy
           |           |          |      |
     +-----+-----+ +---+---+     |      |
     | Memory    | | Tools  |    |      |
-    | (SQLite   | | (6     |    |      |
+    | (SQLite   | | (14    |    |      |
     |  + FTS5   | | built- |    |      |
     |  + Vector)| | in)    |    |      |
     +-----------+ +--------+    |      |
@@ -73,7 +77,7 @@ Orbit is an **operations agent**, not a coding agent. It manages projects, analy
                     +-----------v------v--+
                     |    LLM Provider     |
                     | (Anthropic/OpenAI/  |
-                    |  Bridge)            |
+                    |  Bridge/OAuth)      |
                     +---------------------+
 ```
 
@@ -83,22 +87,23 @@ Orbit is an **operations agent**, not a coding agent. It manages projects, analy
 |--------|---------|-----------|
 | **Types/** | Core data types | `JSONValue`, `ChatMessage`, `ContentBlock`, `StreamEvent`, `TokenUsage` |
 | **Provider/** | LLM abstraction | `LLMProvider` protocol, `AnthropicProvider`, `OpenAIProvider`, `BridgeProvider` |
-| **Auth/** | Authentication | `AuthMode` (apiKey/bridge/oauth), `AuthConfig`, `AuthCredential` |
+| **Auth/** | Authentication | `AuthMode` (apiKey/bridge/oauth), `OAuthManager`, `PKCECodePair` |
 | **Config/** | Configuration | `OrbitConfig`, `ProjectConfig`, `ConfigLoader` (TOML) |
-| **Tools/** | Tool execution | `Tool` protocol, `ToolPool`, 6 built-in tools, `PermissionEnforcer` |
+| **Tools/** | Tool execution | `Tool` protocol, `ToolPool`, 14 built-in tools, `PermissionEnforcer` |
 | **Permissions/** | Access control | `PermissionMode` (5 levels), `PermissionPolicy`, `PermissionRule` |
 | **Engine/** | Orchestration | `QueryEngine` (turn loop with tool execution) |
-| **Memory/** | Persistent memory | `SQLiteMemory` (3-layer), `MemoryRetriever` (tiered), `DreamEngine` |
-| **Context/** | Prompt assembly | `ContextBuilder`, `ORBIT.md` discovery, char limits, dedup |
+| **Memory/** | Persistent memory | `SQLiteMemory` (3-layer), `MemoryRetriever` (tiered), `DreamEngine`, `EmbeddingProvider` |
+| **Context/** | Prompt assembly | `ContextBuilder`, `ORBIT.md` discovery, char limits, SHA256 dedup |
 | **Session/** | Session management | `Session`, `FileSessionStore`, `CompactionEngine` |
 | **Skills/** | Skill loading | `SkillLoader`, YAML frontmatter, trigger patterns |
 | **Agents/** | Sub-agent tree | `AgentNode`, `AgentTree` actor, trace recording |
-| **MCP/** | MCP integration | `MCPRegistry`, `MCPConnector`, name normalization |
+| **MCP/** | MCP integration | `MCPRegistry`, `MCPConnector`, name normalization, config hashing |
 | **Scheduler/** | Cron tasks | `CronExpression`, `TaskDefinition`, `TaskRunner` |
-| **Daemon/** | Background agent | `OrbitDaemon` actor, tick loop, daily logs |
+| **Daemon/** | Background agent | `OrbitDaemon` actor, tick loop, cron matching, daily logs, launchd |
 | **DeepTask/** | Deep analysis | `DeepTask`, `DeepTaskRunner` |
-| **Coding/** | Code awareness | `CodingAwareness`, `CodingDelegate` |
-| **Commands/** | Slash commands | `SlashCommandRegistry`, 11 built-in commands |
+| **Coding/** | Code awareness | `CodingAwareness` (git log, repo structure), `CodingDelegate` |
+| **Commands/** | Slash commands | `SlashCommandRegistry`, 16 built-in commands |
+| **Plugins/** | Plugin system | `OrbitPlugin` protocol, `PluginManager` actor |
 
 ---
 
@@ -145,7 +150,7 @@ Automatically selects the best available strategy:
 
 | Tier | Requires | Method |
 |------|----------|--------|
-| **Vector** | OpenAI API key | Cosine similarity on text-embedding-3-small vectors |
+| **Vector** | OpenAI API key | Cosine similarity on text-embedding-3-small vectors stored in SQLite |
 | **Rerank** | Any LLM provider | LLM scores topic relevance to current query |
 | **Keyword** | Nothing | FTS5 full-text search |
 
@@ -183,6 +188,18 @@ Server identity tracked via SHA-256 config hash for change detection.
 Standard 5-field cron (`minute hour day-of-month month day-of-week`) with:
 - Wildcards (`*`), steps (`*/15`), ranges (`9-17`), lists (`1,3,5`)
 - Calendar weekday mapping (cron Sunday=0 to Calendar Sunday=1)
+- Daemon tick loop auto-matches cron expressions against current time
+
+### OAuth PKCE Authentication
+
+Full OAuth 2.0 PKCE flow for subscription-based auth:
+
+1. Generate cryptographic verifier (32 random bytes) + SHA-256 challenge
+2. Open browser to provider's authorize endpoint
+3. Listen on localhost for callback with authorization code
+4. Exchange code + verifier for access/refresh tokens
+5. Store credentials at `~/.orbit/credentials.json`
+6. Auto-reuse Claude Code credentials from `~/.claude/credentials.json`
 
 ---
 
@@ -241,6 +258,7 @@ model = "claude-sonnet-4-6"
 [auth.anthropic]
 mode = "bridge"       # Uses installed claude CLI (no API key needed)
 # mode = "api_key"    # Requires ANTHROPIC_API_KEY env var
+# mode = "oauth"      # OAuth PKCE (run `orbit auth login` first)
 
 [auth.openai]
 mode = "api_key"
@@ -266,6 +284,14 @@ model = "claude-sonnet-4-6"
 
 [context]
 files = ["docs/about.md", "docs/brand-voice.md"]
+
+[mcps.analytics]
+type = "http"
+url = "https://analytics.example.com/mcp"
+
+[mcps.support]
+type = "http"
+url = "https://support.example.com/mcp"
 ```
 
 ### Scheduled Task: `~/.orbit/schedules/{slug}.toml`
@@ -309,18 +335,46 @@ orbit ask default "Hello" --model claude-haiku-4-5
 | `/status` | Session info (model, tokens, messages) |
 | `/cost` | Token usage and estimated cost |
 | `/model <name>` | Switch active model |
+| `/project [slug]` | Show or switch project |
+| `/config` | Show current configuration |
+| `/memory` | Show memory topics |
 | `/dream` | Trigger memory consolidation |
 | `/deep <prompt>` | Launch deep analysis task |
+| `/trace` | Show session trace |
+| `/permissions` | Show permission mode |
 | `/compact` | Manually compact conversation |
+| `/resume [id]` | List or resume previous sessions |
 | `/export` | Export transcript to file |
 | `/clear` | Clear conversation history |
 | `/exit` | Exit session |
 
+### Project Management
+
+```bash
+orbit init                         # First-time setup wizard
+orbit project list                 # List all projects
+orbit project show my-project      # Details + recent git activity
+orbit project add                  # Interactive project creation
+orbit project switch my-project    # Set default project
+```
+
 ### Scheduled Tasks
 
 ```bash
-orbit schedule list                # List all scheduled tasks
+orbit schedule list                # List all tasks
+orbit schedule enable daily-brief  # Enable a task
+orbit schedule disable weekly      # Disable a task
 orbit run daily-brief              # Manually trigger a task
+orbit logs daily-brief --last 5    # View execution logs
+```
+
+### Memory Management
+
+```bash
+orbit memory list my-project       # List memory topics
+orbit memory search my-project "revenue"  # Search transcripts
+orbit memory export my-project --output report.md  # Export topics
+orbit memory dream my-project      # Run autoDream consolidation
 ```
 
 ### Deep Analysis
@@ -329,39 +383,61 @@ orbit run daily-brief              # Manually trigger a task
 orbit deep "Analyze Q1 performance across all projects" --projects alpha,beta
 ```
 
-### Project Management
+### Coding
 
 ```bash
-orbit project list                 # List all projects
-orbit project show my-project      # Show project details + recent git activity
-orbit status                       # Global overview
+orbit code activity my-project --days 14  # Recent git activity
+orbit code delegate my-project "Fix the login bug" --agent claude-code
 ```
 
 ### Authentication
 
 ```bash
 orbit auth status                  # Show auth configuration
+orbit auth login                   # OAuth PKCE login (opens browser)
+orbit auth remove                  # Clear stored OAuth tokens
 ```
 
-Three auth modes:
+### Background Daemon
+
+```bash
+orbit daemon start                 # Start via launchd
+orbit daemon status                # Check if running
+orbit daemon stop                  # Stop daemon
+```
+
+### Skills
+
+```bash
+orbit skills list my-project       # List available skills
+orbit skills add my-project ~/skills/seo-monitor.md  # Add a skill
+```
+
+### Other
+
+```bash
+orbit status                       # Global overview of all projects
+orbit cost                         # Cost tracking info
+orbit trace                        # Agent trace info
+orbit completions zsh              # Generate shell completions
+```
+
+---
+
+## Authentication Modes
 
 | Mode | How | When to use |
 |------|-----|-------------|
 | **Bridge** | Shells out to `claude` CLI | You have Claude Code installed (uses your subscription) |
 | **API Key** | `ANTHROPIC_API_KEY` env var | Direct API billing |
-| **OAuth PKCE** | Direct subscription auth | Planned for future release |
-
----
-
-## Authentication Modes
+| **OAuth PKCE** | `orbit auth login` | Browser-based login, token stored locally |
 
 ### Bridge Mode (Recommended)
 
 If you have the Claude Code CLI installed, Orbit can use it directly — no API key needed. Your queries are billed to your existing Claude subscription.
 
 ```bash
-# Just works if claude is installed and authenticated
-orbit ask default "Hello"
+orbit ask default "Hello"  # Just works if claude is installed
 ```
 
 ### API Key Mode
@@ -369,11 +445,35 @@ orbit ask default "Hello"
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 orbit ask default "Hello"
-
-# Or for OpenAI
-export OPENAI_API_KEY=sk-...
-orbit ask default "Hello" --model gpt-4o
 ```
+
+### OAuth PKCE Mode
+
+```bash
+orbit auth login           # Opens browser, authenticates, stores token
+orbit ask default "Hello" --auth-mode oauth
+```
+
+---
+
+## Built-in Tools
+
+| Tool | Category | Permission | Description |
+|------|----------|-----------|-------------|
+| `bash` | execution | dangerFullAccess | Shell command execution with timeout |
+| `file_read` | fileIO | readOnly | Read files with offset/limit and line numbers |
+| `file_write` | fileIO | workspaceWrite | Create or overwrite files |
+| `file_edit` | fileIO | workspaceWrite | Targeted string replacement |
+| `glob_search` | search | readOnly | Find files by pattern |
+| `grep_search` | search | readOnly | Regex content search with context |
+| `web_fetch` | network | readOnly | HTTP GET with HTML stripping |
+| `web_search` | network | readOnly | Web search via DuckDuckGo |
+| `git_log` | fileIO | readOnly | Git commit history |
+| `agent` | agent | dangerFullAccess | Spawn sub-agent with own turn loop |
+| `structured_output` | planning | readOnly | Return JSON or markdown tables |
+| `send_notification` | network | readOnly | Send to stdout or file |
+| `browser` | desktop | dangerFullAccess | Navigate, extract, screenshot, execute JS |
+| `computer_use` | desktop | dangerFullAccess | Screenshot, mouse, click, keyboard |
 
 ---
 
@@ -383,20 +483,22 @@ orbit ask default "Hello" --model gpt-4o
 orbit/
 +-- Package.swift                   # SwiftPM manifest
 +-- Sources/
-|   +-- Orbit/                      # CLI executable (6 files)
-|   |   +-- OrbitCLI.swift          # Entry point + ask command
+|   +-- Orbit/                      # CLI executable (8 files)
+|   |   +-- OrbitCLI.swift          # Entry point, 17 subcommands
 |   |   +-- ChatCommand.swift       # Interactive REPL
-|   |   +-- DeepCommand.swift       # Deep analysis command
+|   |   +-- ProviderResolver.swift  # Auth mode auto-detection
 |   |   +-- InitCommand.swift       # Setup wizard
 |   |   +-- ProjectCommands.swift   # Project, memory, auth, status
-|   |   +-- ProviderResolver.swift  # Auth mode auto-detection
-|   |   +-- ScheduleCommands.swift  # Schedule + daemon commands
+|   |   +-- ScheduleCommands.swift  # Schedule, daemon (launchd)
+|   |   +-- DeepCommand.swift       # Deep analysis
+|   |   +-- ExtraCommands.swift     # Code, skills, cost, trace, logs
+|   |   +-- CompletionsCommand.swift # Shell completions
 |   |
-|   +-- OrbitCore/                  # Core library (45 files)
+|   +-- OrbitCore/                  # Core library (55 files)
 |       +-- Agents/                 # AgentNode, AgentTree
-|       +-- Auth/                   # AuthTypes
+|       +-- Auth/                   # AuthTypes, OAuthPKCE
 |       +-- Coding/                 # CodingAwareness, CodingDelegate
-|       +-- Commands/               # SlashCommands
+|       +-- Commands/               # SlashCommands (16 commands)
 |       +-- Config/                 # OrbitConfig, ConfigLoader
 |       +-- Context/                # ContextBuilder
 |       +-- Daemon/                 # OrbitDaemon
@@ -406,16 +508,19 @@ orbit/
 |       +-- Memory/                 # SQLiteMemory, MemoryRetriever,
 |       |                           # DreamEngine, EmbeddingProvider
 |       +-- Permissions/            # PermissionTypes
+|       +-- Plugins/                # PluginSystem
 |       +-- Provider/               # LLMProvider, Anthropic, OpenAI, Bridge
 |       +-- Scheduler/              # CronExpression, TaskDefinition, TaskRunner
 |       +-- Session/                # Session, SessionStore, CompactionEngine
 |       +-- Skills/                 # SkillLoader
 |       +-- Tools/                  # ToolTypes, ToolPool
-|           +-- Builtin/            # bash, file_read/write/edit, glob, grep
+|           +-- Builtin/            # 14 tool implementations
 |
-+-- Tests/OrbitCoreTests/           # 256 tests (23 files)
++-- Tests/OrbitCoreTests/           # 294 tests (26 files)
 +-- docs/                           # Architecture & design documents
 ```
+
+**Stats:** 63 source files, 26 test files, ~10K source LOC, ~4K test LOC.
 
 ---
 
@@ -423,14 +528,14 @@ orbit/
 
 | Package | Purpose |
 |---------|---------|
-| [swift-argument-parser](https://github.com/apple/swift-argument-parser) | CLI command parsing |
+| [swift-argument-parser](https://github.com/apple/swift-argument-parser) | CLI command parsing + shell completions |
 | [SwiftAnthropic](https://github.com/jamesrochabrun/SwiftAnthropic) | Anthropic Claude API |
 | [SwiftOpenAI](https://github.com/jamesrochabrun/SwiftOpenAI) | OpenAI API + embeddings |
 | [TOMLKit](https://github.com/LebJe/TOMLKit) | TOML config parsing |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | SQLite + FTS5 for memory |
 | [swift-log](https://github.com/apple/swift-log) | Structured logging |
-| [swift-crypto](https://github.com/apple/swift-crypto) | SHA-256 hashing |
-| [MCP swift-sdk](https://github.com/modelcontextprotocol/swift-sdk) | Model Context Protocol |
+| [swift-crypto](https://github.com/apple/swift-crypto) | SHA-256 hashing (context dedup, MCP config, PKCE) |
+| [MCP swift-sdk](https://github.com/modelcontextprotocol/swift-sdk) | Model Context Protocol client |
 
 ---
 
@@ -441,9 +546,10 @@ Orbit's architecture is derived from studying [Claw Code](https://github.com/ult
 - **Query engine turn loop** with tool execution and auto-compaction
 - **Session compaction** algorithm (preserve recent N, summarize rest)
 - **MCP tool naming** convention (`mcp__{server}__{tool}`)
-- **Permission system** with graduated modes
+- **Permission system** with graduated modes and workspace boundaries
 - **Context discovery** (ORBIT.md file walking with char limits and dedup)
 - **Config cascade** (user > project > local)
+- **OAuth PKCE** flow for subscription-based authentication
 
 See `docs/CLAW_CODE_ANALYSIS.md` for the full architectural analysis.
 

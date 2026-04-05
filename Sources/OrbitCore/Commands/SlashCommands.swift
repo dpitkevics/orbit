@@ -38,6 +38,7 @@ public enum SlashCommandAction: Sendable, Equatable {
     case dream
     case deep(String)
     case memory
+    case switchProject(String)
 }
 
 /// Result from executing a slash command.
@@ -139,6 +140,8 @@ private func builtinSlashCommands() -> [SlashCommand] {
         ("dream", "Trigger memory consolidation"),
         ("deep", "Launch a deep analysis task"),
         ("trace", "Show agent trace for current session"),
+        ("project", "Show or switch project"),
+        ("config", "Show current configuration"),
         ("permissions", "Show current permission mode"),
         ("compact", "Manually compact conversation history"),
         ("resume", "Resume a previous session"),
@@ -207,6 +210,22 @@ private func builtinSlashCommands() -> [SlashCommand] {
 
         SlashCommand(name: "permissions", description: "Show current permission mode") { _, _ in
             .text("Permission mode: danger-full-access (default for REPL)")
+        },
+
+        SlashCommand(name: "project", description: "Show or switch project") { args, ctx in
+            if let newProject = args?.trimmingCharacters(in: .whitespaces), !newProject.isEmpty {
+                return .action(.switchProject(newProject), output: "Switching to project '\(newProject)'...")
+            }
+            return .text("Current project: \(ctx.project)")
+        },
+
+        SlashCommand(name: "config", description: "Show current configuration") { _, ctx in
+            var lines: [String] = []
+            lines.append("Provider: \(ctx.provider)")
+            lines.append("Model:    \(ctx.model)")
+            lines.append("Project:  \(ctx.project)")
+            lines.append("Config:   ~/.orbit/orbit.toml")
+            return .text(lines.joined(separator: "\n"))
         },
 
         SlashCommand(name: "compact", description: "Manually compact conversation history") { _, _ in

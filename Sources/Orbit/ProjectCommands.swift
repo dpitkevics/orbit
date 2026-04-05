@@ -7,7 +7,7 @@ import OrbitCore
 struct Project: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage projects.",
-        subcommands: [ProjectList.self, ProjectShow.self]
+        subcommands: [ProjectList.self, ProjectShow.self, ProjectAdd.self, ProjectSwitch.self]
     )
 }
 
@@ -99,12 +99,79 @@ struct ProjectShow: ParsableCommand {
     }
 }
 
+struct ProjectAdd: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "add",
+        abstract: "Add a new project interactively."
+    )
+
+    func run() {
+        print("Project name: ", terminator: "")
+        fflush(stdout)
+        guard let name = readLine()?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
+            print("Cancelled.")
+            return
+        }
+
+        let slug = name.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+
+        print("Repository path (optional): ", terminator: "")
+        fflush(stdout)
+        let repo = readLine()?.trimmingCharacters(in: .whitespaces)
+
+        print("Description (optional): ", terminator: "")
+        fflush(stdout)
+        let description = readLine()?.trimmingCharacters(in: .whitespaces)
+
+        var toml = "[project]\nname = \"\(name)\"\nslug = \"\(slug)\""
+        if let desc = description, !desc.isEmpty { toml += "\ndescription = \"\(desc)\"" }
+        if let repo, !repo.isEmpty { toml += "\nrepo = \"\(repo)\"" }
+
+        let path = ConfigLoader.orbitHome.appendingPathComponent("projects/\(slug).toml")
+        try? FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try? toml.write(to: path, atomically: true, encoding: .utf8)
+
+        // Create skills directory
+        let skillsDir = ConfigLoader.orbitHome.appendingPathComponent("skills/\(slug)")
+        try? FileManager.default.createDirectory(at: skillsDir, withIntermediateDirectories: true)
+
+        print("Created project '\(slug)' at \(path.path)")
+    }
+}
+
+struct ProjectSwitch: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "switch",
+        abstract: "Set the default project."
+    )
+
+    @Argument(help: "Project slug to set as default.")
+    var slug: String
+
+    func run() {
+        let projects = ConfigLoader.listProjects()
+        guard projects.contains(slug) else {
+            print("Project '\(slug)' not found. Available: \(projects.joined(separator: ", "))")
+            return
+        }
+        // Write a .orbit/active-project file
+        let activePath = ConfigLoader.orbitHome.appendingPathComponent("active-project")
+        try? slug.write(to: activePath, atomically: true, encoding: .utf8)
+        print("Default project set to '\(slug)'.")
+    }
+}
+
 // MARK: - orbit memory
 
 struct Memory: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage project memory.",
-        subcommands: [MemorySearch.self, MemoryList.self]
+        subcommands: [MemorySearch.self, MemoryList.self, MemoryExport.self, MemoryDream.self]
     )
 }
 
@@ -168,12 +235,67 @@ struct MemoryList: AsyncParsableCommand {
     }
 }
 
+struct MemoryExport: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "export",
+        abstract: "Export memory topics to a markdown file."
+    )
+
+    @Argument(help: "Project slug.")
+    var project: String
+
+    @Option(name: .long, help: "Output file path (default: stdout).")
+    var output: String?
+
+    func run() async throws {
+        let store = try SQLiteMemory(path: "~/.orbit/memory.db")
+        let topics = try await store.listTopics(project: project)
+
+        var content = "# Memory Export — \(project)\n\n"
+        for ref in topics {
+            if let topic = try await store.loadTopic(slug: ref.slug, project: project) {
+                content += "## \(topic.title)\n\n\(topic.body)\n\n---\n\n"
+            }
+        }
+
+        if let outputPath = output {
+            try content.write(toFile: outputPath, atomically: true, encoding: .utf8)
+            print("Exported \(topics.count) topics to \(outputPath)")
+        } else {
+            print(content)
+        }
+    }
+}
+
+struct MemoryDream: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "dream",
+        abstract: "Run autoDream memory consolidation."
+    )
+
+    @Argument(help: "Project slug.")
+    var project: String
+
+    func run() async throws {
+        let store = try SQLiteMemory(path: "~/.orbit/memory.db")
+        print("Running autoDream for '\(project)'...")
+        let report = try await DreamEngine.dream(store: store, project: project)
+        print("Dream complete:")
+        print("  Transcripts scanned: \(report.transcriptsScanned)")
+        print("  Observations: \(report.observationsExtracted)")
+        print("  Topics created: \(report.topicsCreated)")
+        print("  Topics updated: \(report.topicsUpdated)")
+        print("  Entries pruned: \(report.entriesPruned)")
+        print("  Duration: \(String(format: "%.1f", report.duration))s")
+    }
+}
+
 // MARK: - orbit auth
 
 struct Auth: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage authentication.",
-        subcommands: [AuthStatus.self, AuthLogin.self]
+        subcommands: [AuthStatus.self, AuthLogin.self, AuthRemove.self]
     )
 }
 
@@ -255,6 +377,23 @@ struct AuthStatus: ParsableCommand {
             print("  Coding agents: None detected")
         } else {
             print("  Coding agents: \(agents.map(\.rawValue).joined(separator: ", "))")
+        }
+    }
+}
+
+struct AuthRemove: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "remove",
+        abstract: "Remove stored OAuth credentials."
+    )
+
+    func run() {
+        let manager = OAuthManager()
+        do {
+            try manager.clearCredentials()
+            print("OAuth credentials removed.")
+        } catch {
+            print("Error: \(error.localizedDescription)")
         }
     }
 }

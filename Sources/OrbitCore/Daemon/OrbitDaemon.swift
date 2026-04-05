@@ -58,10 +58,20 @@ public actor OrbitDaemon {
             while !Task.isCancelled {
                 let tickNum = self.performTick()
                 let enabledTasks = tasks.filter { $0.enabled }
+
+                // Check which tasks are due based on cron expressions
+                let now = Calendar.current.dateComponents(
+                    [.minute, .hour, .day, .month, .weekday], from: Date()
+                )
+                let dueTasks = enabledTasks.filter { task in
+                    (try? CronExpression(task.cron).matches(now)) ?? false
+                }
+
                 let context = DaemonTickContext(
                     tickNumber: tickNum,
                     config: config,
-                    tasks: enabledTasks
+                    tasks: enabledTasks,
+                    dueTasks: dueTasks
                 )
 
                 await onTick(context)
@@ -119,4 +129,18 @@ public struct DaemonTickContext: Sendable {
     public let tickNumber: UInt64
     public let config: DaemonConfig
     public let tasks: [TaskDefinition]
+    /// Tasks whose cron expression matches the current time.
+    public let dueTasks: [TaskDefinition]
+
+    public init(
+        tickNumber: UInt64,
+        config: DaemonConfig,
+        tasks: [TaskDefinition],
+        dueTasks: [TaskDefinition] = []
+    ) {
+        self.tickNumber = tickNumber
+        self.config = config
+        self.tasks = tasks
+        self.dueTasks = dueTasks
+    }
 }

@@ -111,7 +111,7 @@ struct CodeDelegate_: AsyncParsableCommand {
 struct Skills: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage skills.",
-        subcommands: [SkillsList.self]
+        subcommands: [SkillsList.self, SkillsAdd.self]
     )
 }
 
@@ -140,6 +140,39 @@ struct SkillsList: ParsableCommand {
             if !skill.triggerPatterns.isEmpty {
                 print("    Triggers: \(skill.triggerPatterns.joined(separator: ", "))")
             }
+        }
+    }
+}
+
+struct SkillsAdd: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "add",
+        abstract: "Add a skill file to a project."
+    )
+
+    @Argument(help: "Project slug.")
+    var project: String
+
+    @Argument(help: "Path to the skill markdown file.")
+    var file: String
+
+    func run() {
+        let sourcePath = (file as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: sourcePath) else {
+            print("File not found: \(file)")
+            return
+        }
+
+        let filename = (sourcePath as NSString).lastPathComponent
+        let destDir = ConfigLoader.orbitHome.appendingPathComponent("skills/\(project)")
+        try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        let destPath = destDir.appendingPathComponent(filename)
+
+        do {
+            try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath.path)
+            print("Added skill '\(filename)' to project '\(project)'.")
+        } catch {
+            print("Error: \(error.localizedDescription)")
         }
     }
 }
