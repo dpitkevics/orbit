@@ -91,6 +91,28 @@ struct Chat: AsyncParsableCommand {
         let renderer = TerminalRenderer(theme: theme)
         let useRichRendering = TerminalDetector.isInteractive
 
+        // Full-screen TUI for interactive terminals
+        if useRichRendering {
+            let tui = TUIApplication(
+                provider: provider,
+                toolPool: toolPool,
+                policy: policy,
+                commandRegistry: commandRegistry,
+                sessionStore: sessionStore,
+                memoryStore: memoryStore,
+                session: session,
+                systemPrompt: systemPrompt,
+                projectName: projectConfig.name,
+                projectSlug: projectConfig.slug,
+                model: effectiveModel,
+                providerName: effectiveProvider,
+                theme: theme
+            )
+            try await tui.run()
+            return
+        }
+
+        // Fallback: plain REPL for non-interactive terminals
         // Print startup banner
         let connectedMCP = await mcpRegistry.connectedCount
         if useRichRendering {
