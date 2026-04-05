@@ -4,7 +4,7 @@ Read ORBIT_PROJECT_SPEC.md for the full project specification.
 
 ## Current Phase
 
-Phase 7 — Scheduler + Daemon. Phases 0-6 are complete.
+Phase 8 — autoDream + Deep Tasks. Phases 0-7 are complete.
 
 ## Completed Phases
 
@@ -57,6 +57,13 @@ Located in `docs/`: CLAW_CODE_ANALYSIS.md, SWIFT_PATTERNS.md, ADAPTATION_NOTES.m
 - OpenAI provider: GPT-4o, o3, GPT-4o-mini with streaming + tool use via SwiftOpenAI SDK
 - Shared provider resolver: auto-detect auth mode (API key → bridge → error), supports both providers
 - Session persistence wired into REPL
+
+### Phase 7 — Scheduler + Daemon (230 tests)
+- CronExpression parser: 5-field standard cron with wildcards, steps, ranges, lists
+- TaskDefinition: TOML-based task configs with prompt text/file, MCP server selection
+- TaskRunner: executes tasks through QueryEngine, logs results to disk
+- OrbitDaemon actor: configurable tick loop, daily log accumulation, task context passing
+- CLI commands: orbit run <slug>, orbit schedule list, orbit daemon status
 
 ## Key Architecture Decisions
 
