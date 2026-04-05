@@ -1,6 +1,5 @@
 import ArgumentParser
 import Foundation
-import LineNoise
 import OrbitCore
 
 /// Interactive REPL session — the primary interface for Orbit.
@@ -106,28 +105,17 @@ struct Chat: AsyncParsableCommand {
         print("\n" + ANSI.colored("Type /help for commands, /exit to quit.", theme.dim) + "\n")
 
         // LineNoise editor with history + tab completion
-        let ln = LineNoise()
+        // Raw terminal input with clipboard image support
         let historyPath = ConfigLoader.orbitHome.appendingPathComponent("history").path
-        try? ln.loadHistory(fromFile: historyPath)
+        let termInput = RawTerminalInput(historyPath: historyPath, theme: theme)
 
         // Slash command tab completion
         let slashCommands = commandRegistry.allCommands().map { "/\($0.name)" }
-        ln.setCompletionCallback { buffer in
+        termInput.setCompletionCallback { buffer in
             if buffer.hasPrefix("/") {
                 return slashCommands.filter { $0.hasPrefix(buffer) }
             }
             return []
-        }
-
-        // Hints for slash commands
-        ln.setHintsCallback { buffer in
-            if buffer.hasPrefix("/") && !buffer.contains(" ") {
-                if let match = slashCommands.first(where: { $0.hasPrefix(buffer) && $0 != buffer }) {
-                    let hint = String(match.dropFirst(buffer.count))
-                    return (hint, (127, 127, 127))
-                }
-            }
-            return (nil, nil)
         }
 
         var messages: [ChatMessage] = []
@@ -151,20 +139,21 @@ struct Chat: AsyncParsableCommand {
 
         // REPL loop
         while true {
+            let result = termInput.readLine(prompt: "\(theme.prompt)▸\(ANSI.reset) ")
+
             let input: String
-            do {
-                let line = try ln.getLine(prompt: "\(theme.prompt)▸\(ANSI.reset) ")
-                input = line.trimmingCharacters(in: .whitespaces)
-                if !input.isEmpty {
-                    ln.addHistory(input)
-                    try? ln.saveHistory(toFile: historyPath)
-                }
-            } catch LinenoiseError.CTRL_C {
-                continue // Cancel current input
-            } catch LinenoiseError.EOF {
-                break // Ctrl+D exits
-            } catch {
-                break
+            switch result {
+            case .submit(let text, let attachments):
+                input = text.trimmingCharacters(in: .whitespaces)
+                pendingAttachments.append(contentsOf: attachments)
+            case .cancel:
+                continue
+            case .eof:
+                // Save and exit
+                await saveTranscript(messages: messages, session: session, store: memoryStore, project: projectConfig.slug)
+                try? sessionStore.save(session, project: projectConfig.slug)
+                await mcpConnector.disconnectAll()
+                return
             }
 
             guard !input.isEmpty else { continue }
