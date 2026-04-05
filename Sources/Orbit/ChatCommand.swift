@@ -91,18 +91,24 @@ struct Chat: AsyncParsableCommand {
         let renderer = TerminalRenderer(theme: theme)
         let useRichRendering = TerminalDetector.isInteractive
 
-        // Print header
+        // Print startup banner
         let connectedMCP = await mcpRegistry.connectedCount
-        print(ANSI.colored("Orbit v0.1.0", ANSI.bold) + " — \(projectConfig.name)")
-        print(ANSI.colored("Model:", theme.dim) + " \(effectiveModel) " +
-              ANSI.colored("Provider:", theme.dim) + " \(effectiveProvider)", terminator: "")
-        if connectedMCP > 0 {
-            print(" " + ANSI.colored("MCP:", theme.dim) + " \(connectedMCP)", terminator: "")
+        if useRichRendering {
+            print(StartupBanner.render(
+                model: effectiveModel,
+                provider: effectiveProvider,
+                permissionMode: "full-access",
+                project: projectConfig.name,
+                cwd: cwd.path,
+                sessionID: session.sessionID,
+                mcpCount: connectedMCP,
+                skillCount: allSkills.count
+            ))
+        } else {
+            print("Orbit v0.1.0 — \(projectConfig.name)")
+            print("Model: \(effectiveModel) | Provider: \(effectiveProvider)")
+            print("Type /help for commands, /exit to quit.\n")
         }
-        if !allSkills.isEmpty {
-            print(" " + ANSI.colored("Skills:", theme.dim) + " \(allSkills.count)", terminator: "")
-        }
-        print("\n" + ANSI.colored("Type /help for commands, /exit to quit.", theme.dim) + "\n")
 
         // LineNoise editor with history + tab completion
         // Raw terminal input with clipboard image support
@@ -139,7 +145,7 @@ struct Chat: AsyncParsableCommand {
 
         // REPL loop
         while true {
-            let result = termInput.readLine(prompt: "\(theme.prompt)▸\(ANSI.reset) ")
+            let result = termInput.readLine(prompt: "> ")
 
             let input: String
             switch result {
@@ -307,15 +313,25 @@ struct Chat: AsyncParsableCommand {
             let stream = engine.run(messages: &messages, systemPrompt: systemPrompt)
 
             var streamState = MarkdownStreamState(renderer: renderer)
-            var toolSpinner = Spinner(theme: theme)
+            var thinkingSpinner = Spinner(theme: theme)
             var hasOutput = false
+            var thinkingShown = false
+
+            // Show thinking spinner
+            thinkingSpinner.tick(label: "Thinking...")
+            thinkingShown = true
 
             do {
                 for try await event in stream {
                     switch event {
                     case .textDelta(let text):
+                        // Clear thinking spinner on first text
+                        if thinkingShown {
+                            thinkingSpinner.finish(label: "")
+                            thinkingShown = false
+                        }
+
                         if useRichRendering {
-                            // Accumulate and render at safe boundaries
                             if let rendered = streamState.push(text) {
                                 print(rendered, terminator: "")
                                 fflush(stdout)
@@ -327,26 +343,36 @@ struct Chat: AsyncParsableCommand {
                         hasOutput = true
 
                     case .toolCallStart(_, let name):
+                        // Clear thinking spinner
+                        if thinkingShown {
+                            thinkingSpinner.finish(label: "")
+                            thinkingShown = false
+                        }
+
                         if hasOutput {
-                            // Flush pending markdown
                             if let remaining = streamState.flush() {
                                 print(remaining, terminator: "")
                             }
                             print()
                         }
-                        toolSpinner.tick(label: ANSI.colored(name, theme.toolName))
+
+                        // Find tool input from the stream context
+                        let toolInput: JSONValue = .object([:])
+                        print(ToolCallDisplay.formatStart(name: name, input: toolInput))
+
+                        // Start spinner for tool execution
+                        var toolSpinner = Spinner(theme: theme)
+                        toolSpinner.tick(label: "\(ToolCallDisplay.icon(for: name)) Running...")
 
                     case .toolCallEnd(_, let name, let result):
                         if result.isError {
-                            toolSpinner.fail(label: "\(ANSI.colored(name, theme.toolName)) failed")
+                            print(ToolCallDisplay.formatFailure(name: name, error: result.output))
                         } else {
-                            let preview = String(result.output.prefix(60))
-                                .replacingOccurrences(of: "\n", with: " ")
-                            toolSpinner.finish(label: "\(ANSI.colored(name, theme.toolName)) \(ANSI.colored("(\(preview))", theme.dim))")
+                            print(ToolCallDisplay.formatSuccess(name: name, output: result.output))
                         }
 
                     case .toolDenied(let name, let reason):
-                        toolSpinner.skip(label: "\(name) denied: \(reason)")
+                        print(ToolCallDisplay.formatDenied(name: name, reason: reason))
 
                     case .usageUpdate(let usage):
                         totalUsage += usage
