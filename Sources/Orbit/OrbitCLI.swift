@@ -75,7 +75,8 @@ struct Ask: AsyncParsableCommand {
         let skillLoader = SkillLoader()
         let skills = skillLoader.loadSkills(project: projectConfig.slug)
         let systemPrompt = await buildFullAskSystemPrompt(
-            project: projectConfig, cwd: cwd, memoryStore: memoryStore, skills: skills
+            project: projectConfig, cwd: cwd, memoryStore: memoryStore, skills: skills,
+            provider: provider, query: query
         )
 
         let policy = PermissionPolicy(activeMode: .dangerFullAccess)
@@ -153,7 +154,9 @@ private func buildFullAskSystemPrompt(
     project: ProjectConfig,
     cwd: URL,
     memoryStore: SQLiteMemory?,
-    skills: [Skill]
+    skills: [Skill],
+    provider: (any LLMProvider)? = nil,
+    query: String = ""
 ) async -> String {
     let identity = """
     You are Orbit, an AI operations assistant. You help manage projects, \
@@ -164,14 +167,27 @@ private func buildFullAskSystemPrompt(
 
     let instructionFiles = ContextBuilder.discoverInstructionFiles(at: cwd)
 
+    // Use tiered MemoryRetriever instead of basic assembleContext
     var memoryContext: String? = nil
     if let store = memoryStore {
-        memoryContext = try? await store.assembleContext(project: project.slug, currentQuery: "", maxEntries: 20)
+        let retriever = MemoryRetriever(memory: store, llmProvider: provider)
+        memoryContext = try? await retriever.assembleContext(
+            project: project.slug, query: query, maxTopics: 10
+        )
     }
 
+    // Filter skills by query relevance
     var skillsContext: String? = nil
-    if !skills.isEmpty {
-        let texts = skills.map { "### \($0.name)\n\($0.content)" }
+    let relevantSkills: [Skill]
+    if !query.isEmpty {
+        let loader = SkillLoader()
+        let matched = loader.matchSkills(project: project.slug, query: query)
+        relevantSkills = matched.isEmpty ? skills : matched
+    } else {
+        relevantSkills = skills
+    }
+    if !relevantSkills.isEmpty {
+        let texts = relevantSkills.map { "### \($0.name)\n\($0.content)" }
         skillsContext = "# Available Skills\n\n" + texts.joined(separator: "\n\n")
     }
 

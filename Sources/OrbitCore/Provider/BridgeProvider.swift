@@ -52,20 +52,33 @@ public struct BridgeProvider: LLMProvider, Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    // Build the prompt from the last user message
-                    let prompt = messages.last?.textContent ?? ""
+                    // Build full prompt with conversation history
+                    let prompt = Self.buildPromptWithHistory(messages)
+
+                    // Write system prompt to temp file (avoids CLI arg length limits)
+                    let tempDir = FileManager.default.temporaryDirectory
+                    let promptFile = tempDir.appendingPathComponent("orbit_system_prompt_\(ProcessInfo.processInfo.processIdentifier).txt")
+                    try systemPrompt.write(to: promptFile, atomically: true, encoding: .utf8)
+                    defer { try? FileManager.default.removeItem(at: promptFile) }
 
                     let process = Process()
                     process.executableURL = URL(fileURLWithPath: cliPath)
-                    process.arguments = [
+
+                    var args = [
                         "--print",
                         "--output-format", "stream-json",
                         "--verbose",
                         "--model", model,
-                        "--system-prompt", systemPrompt,
+                        "--system-prompt-file", promptFile.path,
                         "--no-session-persistence",
-                        prompt,
                     ]
+
+                    // Add workspace directory for file access
+                    let cwd = FileManager.default.currentDirectoryPath
+                    args.append(contentsOf: ["--add-dir", cwd])
+
+                    args.append(prompt)
+                    process.arguments = args
 
                     let stdoutPipe = Pipe()
                     let stderrPipe = Pipe()
@@ -133,6 +146,37 @@ public struct BridgeProvider: LLMProvider, Sendable {
     public func estimateCost(usage: TokenUsage) -> CostEstimate {
         // Bridge uses subscription, but we still track for awareness
         usage.estimateCost(pricing: ModelPricing.forModel(model))
+    }
+
+    // MARK: - Conversation History
+
+    /// Build a prompt that includes conversation history context for the CLI.
+    /// The claude CLI doesn't support multi-turn, so we embed history in the prompt.
+    private static func buildPromptWithHistory(_ messages: [ChatMessage]) -> String {
+        guard messages.count > 1 else {
+            return messages.last?.textContent ?? ""
+        }
+
+        var parts: [String] = []
+
+        // Include conversation history as context
+        let historyMessages = messages.dropLast()
+        if !historyMessages.isEmpty {
+            parts.append("Previous conversation context:")
+            for msg in historyMessages {
+                let role = msg.role.rawValue.capitalized
+                let text = msg.textContent
+                if !text.isEmpty {
+                    parts.append("[\(role)] \(text)")
+                }
+            }
+            parts.append("\nCurrent request:")
+        }
+
+        // Current message
+        parts.append(messages.last?.textContent ?? "")
+
+        return parts.joined(separator: "\n")
     }
 
     // MARK: - Stream Processing

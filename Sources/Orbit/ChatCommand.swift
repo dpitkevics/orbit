@@ -52,10 +52,6 @@ struct Chat: AsyncParsableCommand {
             globalConfig: globalConfig
         )
 
-        // Tools
-        let policy = PermissionPolicy(activeMode: .dangerFullAccess)
-        let tools: [any Tool] = noTools ? [] : allTools(provider: provider, policy: policy)
-        let toolPool = ToolPool(tools: tools)
         let commandRegistry = SlashCommandRegistry.default
 
         // Memory
@@ -70,6 +66,13 @@ struct Chat: AsyncParsableCommand {
         let mcpConnector = MCPConnector(registry: mcpRegistry)
         await connectMCPServers(config: globalConfig, project: projectConfig, connector: mcpConnector)
 
+        // Tools — built-in + MCP (after MCP connection)
+        let policy = PermissionPolicy(activeMode: .dangerFullAccess)
+        var tools: [any Tool] = noTools ? [] : allTools(provider: provider, policy: policy)
+        let mcpTools = await mcpToolWrappers(registry: mcpRegistry, connector: mcpConnector)
+        tools.append(contentsOf: mcpTools)
+        let toolPool = ToolPool(tools: tools)
+
         // Session
         var session = Session()
         let sessionStore = FileSessionStore()
@@ -83,7 +86,8 @@ struct Chat: AsyncParsableCommand {
             cwd: cwd,
             memoryStore: memoryStore,
             skills: allSkills,
-            mcpRegistry: mcpRegistry
+            mcpRegistry: mcpRegistry,
+            provider: provider
         )
 
         // Terminal rendering
@@ -443,7 +447,9 @@ private func buildFullSystemPrompt(
     cwd: URL,
     memoryStore: SQLiteMemory?,
     skills: [Skill],
-    mcpRegistry: MCPRegistry
+    mcpRegistry: MCPRegistry,
+    provider: (any LLMProvider)? = nil,
+    currentQuery: String = ""
 ) async -> String {
     let identity = """
     You are Orbit, an AI operations assistant. You help manage projects, \
@@ -455,20 +461,33 @@ private func buildFullSystemPrompt(
     // Discover ORBIT.md files
     let instructionFiles = ContextBuilder.discoverInstructionFiles(at: cwd)
 
-    // Load memory context
+    // Load memory context via tiered MemoryRetriever
     var memoryContext: String? = nil
     if let store = memoryStore {
-        memoryContext = try? await store.assembleContext(
+        let retriever = MemoryRetriever(
+            memory: store,
+            embeddingProvider: nil, // Vector tier requires OpenAI key — added when configured
+            llmProvider: provider   // Enables Tier 2 (LLM reranking) when provider available
+        )
+        memoryContext = try? await retriever.assembleContext(
             project: project.slug,
-            currentQuery: "",
-            maxEntries: 20
+            query: currentQuery,
+            maxTopics: 10
         )
     }
 
-    // Format skills context
+    // Format skills context — filter by query relevance using trigger patterns
     var skillsContext: String? = nil
-    if !skills.isEmpty {
-        let skillTexts = skills.map { "### \($0.name)\n\($0.content)" }
+    let relevantSkills: [Skill]
+    if !currentQuery.isEmpty {
+        let loader = SkillLoader()
+        let matched = loader.matchSkills(project: project.slug, query: currentQuery)
+        relevantSkills = matched.isEmpty ? skills : matched // Fall back to all if no matches
+    } else {
+        relevantSkills = skills
+    }
+    if !relevantSkills.isEmpty {
+        let skillTexts = relevantSkills.map { "### \($0.name)\n\($0.content)" }
         skillsContext = "# Available Skills\n\n" + skillTexts.joined(separator: "\n\n")
     }
 
