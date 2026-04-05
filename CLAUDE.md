@@ -4,7 +4,7 @@ Read ORBIT_PROJECT_SPEC.md for the full project specification.
 
 ## Current Phase
 
-Phase 5 — Agent Tree. Phases 0-4 are complete.
+Phase 6 — Interactive REPL. Phases 0-5 are complete.
 
 ## Completed Phases
 
@@ -44,6 +44,12 @@ Located in `docs/`: CLAW_CODE_ANALYSIS.md, SWIFT_PATTERNS.md, ADAPTATION_NOTES.m
 - MCPConnector: official MCP Swift SDK integration, StdioTransport (subprocess piping), HTTPClientTransport
 - Value conversion between Orbit JSONValue and MCP Value types
 - Connection lifecycle: connect/disconnect/reconnect with status tracking
+
+### Phase 5 — Agent Tree (190 tests)
+- AgentNode: hierarchical spawning with parent-child links, depth limits (max 5), status transitions, trace recording
+- AgentTree actor: global tracking, cost aggregation, failed node detection, depth filtering, trace visualization
+- AgentResult, TraceEntry, MemoryAccessLevel types
+- TDD for all core logic
 
 ## Key Architecture Decisions
 
